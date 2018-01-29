@@ -25,6 +25,37 @@ import shutil
 # URL from which to download the latest COCO trained weights
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
 
+# Run-length encoding from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python
+def rle_encoding(x):
+    dots = np.where(x.T.flatten() == 1)[0]
+    run_lengths = []
+    prev = -2
+    for b in dots:
+        if (b > prev + 1): run_lengths.extend((b + 1, 0))
+        run_lengths[-1] += 1
+        prev = b
+    return run_lengths
+
+def prob_to_rles(x, cutoff=0.5):
+    yield rle_encoding(x > cutoff)
+
+def rle_decoding(rle, shape):
+    '''
+    mask_rle: run-length as string formated (start length)
+    shape: (height,width) of array to return
+    Returns numpy array, 1 - mask, 0 - background
+
+    '''
+    starts = np.array(rle[::2])
+    lengths = np.array(rle[1::2])
+    print starts
+    print lengths
+    starts -= 1
+    ends = starts + lengths
+    img = np.zeros(shape[0] * shape[1], dtype=np.uint8)
+    for lo, hi in zip(starts, ends):
+        img[lo:hi] = 1
+    return img.reshape(shape, order='F')
 
 ############################################################
 #  Bounding Boxes
@@ -342,6 +373,8 @@ class Dataset(object):
         # Load image
         image = skimage.io.imread(self.image_info[image_id]['path'])
         # If grayscale. Convert to RGB for consistency.
+        if image.shape[2]==4:
+            image = image[:,:,0:2]
         if image.ndim != 3:
             image = skimage.color.gray2rgb(image)
         return image
@@ -650,19 +683,18 @@ def compute_mask_ap(gt_mask,pred_mask, pred_scores,iou_threshold=0.5):
     
     labels = np.sum(gt_mask,axis=2)
     y_pred = np.sum(pred_mask,axis=2)
-        
+ 
     # Compute intersection between all objects
-    intersection = np.histogram2d(labels.flatten(), y_pred.flatten(), bins=(true_objects, pred_objects))[0]
+    intersection = np.histogram2d(labels.flatten(), y_pred.flatten(), bins=(true_objects+1, pred_objects+1))[0]
 
     # Compute areas (needed for finding the union between all objects)
-    area_true = np.histogram(labels, bins = true_objects)[0]
-    area_pred = np.histogram(y_pred, bins = pred_objects)[0]
+    area_true = np.histogram(labels, bins = true_objects+1)[0]
+    area_pred = np.histogram(y_pred, bins = pred_objects+1)[0]
     area_true = np.expand_dims(area_true, -1)
     area_pred = np.expand_dims(area_pred, 0)
 
     # Compute union
     union = area_true + area_pred - intersection
-
     # Exclude background from the analysis
     intersection = intersection[1:,1:]
     union = union[1:,1:]
@@ -670,12 +702,12 @@ def compute_mask_ap(gt_mask,pred_mask, pred_scores,iou_threshold=0.5):
 
     # Compute the intersection over union
     iou = intersection / union
-
     matches = iou > iou_threshold
     true_positives = np.sum(matches, axis=1) == 1   # Correct objects
     false_positives = np.sum(matches, axis=0) == 0  # Missed objects
     false_negatives = np.sum(matches, axis=1) == 0  # Extra objects
     tp, fp, fn = np.sum(true_positives), np.sum(false_positives), np.sum(false_negatives)
+
     return tp/(tp + fp + fn)
 
 def sweep_iou_mask_ap(gt_mask,pred_mask, pred_scores):
