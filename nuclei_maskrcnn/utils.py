@@ -708,14 +708,13 @@ def compute_mask_ap(gt_mask,pred_mask, pred_scores,iou_threshold=0.5):
     false_negatives = np.sum(matches, axis=1) == 0  # Extra objects
     tp, fp, fn = np.sum(true_positives), np.sum(false_positives), np.sum(false_negatives)
 
-    return tp/(tp + fp + fn)
+    return tp*1./(tp + fp + fn)
 
 def sweep_iou_mask_ap(gt_mask,pred_mask, pred_scores):
     iou_thresholds = np.arange(0.5,1,0.05)
     ap = []
     for iou_threshold in iou_thresholds:
-        ap.append(compute_mask_ap(gt_mask,pred_mask, pred_scores,
-               iou_threshold=iou_threshold))
+        ap.append(compute_mask_ap(gt_mask,pred_mask, pred_scores, iou_threshold=iou_threshold))
     return np.mean(ap)
 
 def deoverlap_masks(masks):

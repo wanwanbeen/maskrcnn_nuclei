@@ -10,6 +10,7 @@ import skimage.io
 from skimage.color import gray2rgb, label2rgb
 from sklearn.model_selection import train_test_split
 import pandas as pd
+import time
 
 from config import Config
 import utils
@@ -34,7 +35,7 @@ import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
-train_flag = True
+train_flag = False
 
 ###########################################
 # Training Config
@@ -188,12 +189,16 @@ for image_id in dataset_val.image_ids:
     # Load image and ground truth data
     image, image_meta, gt_class_id, gt_bbox, gt_mask = \
         modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
-    molded_images = np.expand_dims(modellib.mold_image(image, inference_config), 0)
     # Run object detection
+    t = time.time()
     results = model.detect([image], verbose=0)
+    t2 = time.time()
+    print(t2-t)
     r = results[0]
     # Compute AP
     AP = utils.sweep_iou_mask_ap(gt_mask, r["masks"], r["scores"])
+    t3 = time.time()
+    print(t3-t2)
     APs.append(AP)
     print np.mean(APs)
 
@@ -208,7 +213,7 @@ for image_id in dataset_val.image_ids:
         rmaskcollapse = rmaskcollapse + masks[:, :, i] * (i + 1)
     rmaskcollapse = label2rgb(rmaskcollapse, bg_label=0)
 
-    skimage.io.imsave(TEST_VAL_MASK_SAVE_PATH + '/' + model_name + '/' + train_id + '_mask.png',
+    skimage.io.imsave(TEST_VAL_MASK_SAVE_PATH + '/' + model_name + '/ap_' + '%.2f' % AP + '_' + train_id + '_mask.png',
                       np.concatenate((rmaskcollapse_gt, image / 255., rmaskcollapse), axis=1))
 print("mAP: ", np.mean(APs))
 

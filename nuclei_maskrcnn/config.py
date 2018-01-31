@@ -93,7 +93,8 @@ class Config(object):
     IMAGE_PADDING = True  # currently, the False option is not supported
 
     # Image mean (RGB)
-    MEAN_PIXEL = np.array([123.7, 116.8, 103.9])
+    MEAN_PIXEL = np.array([48.2, 40.1, 44.9])  # Nuclei
+    # MEAN_PIXEL = np.array([123.7, 116.8, 103.9])  # ImageNet
 
     # Number of ROIs per image to feed to classifier/mask heads
     # The Mask RCNN paper uses 512 but often the RPN doesn't generate
