@@ -29,17 +29,23 @@ TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
 TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
 TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
-train_flag = False
+train_flag = True
 
 ###########################################
 # Training Config
 ###########################################
+
+# 20180131:
+# RPN_ANCHOR_SCALES=(16,32,64,128);
+# RPN_TRAIN_ANCHORS_PER_IMAGE=256;
+# DETECTION_MAX_INSTANCES=300;
+# TRAIN_ROIS_PER_IMAGE=256
 
 class TrainingConfig(Config):
 
@@ -53,9 +59,19 @@ class TrainingConfig(Config):
     IMAGE_MIN_DIM = 256
     IMAGE_MAX_DIM = 1408
 
-    VALIDATION_STEPS = 5
+    VALIDATION_STEPS = 136
     STEPS_PER_EPOCH = 1064
     MAX_GT_INSTANCES = 400
+
+    RPN_ANCHOR_SCALES = (16, 32, 64, 128)
+
+    RPN_TRAIN_ANCHORS_PER_IMAGE = 256
+
+    DETECTION_MAX_INSTANCES = 300
+
+    TRAIN_ROIS_PER_IMAGE = 256
+
+    RPN_NMS_THRESHOLD = 0.5
 
 config = TrainingConfig()
 config.display()
@@ -175,6 +191,8 @@ assert model_path != "", "Provide path to trained weights"
 print("Loading weights from ", model_path)
 model.load_weights(model_path, by_name=True)
 model_name = model_path.split('/')[-2]
+model_epoch = model_path.split('/')[-1].split('.')[0][-5:]
+model_name = model_name+model_epoch
 
 ###########################################
 # Begin Validation

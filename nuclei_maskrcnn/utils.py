@@ -673,16 +673,16 @@ def compute_mask_ap(gt_mask,pred_mask, pred_scores,iou_threshold=0.5):
     true_objects = gt_mask.shape[2]
     pred_objects = pred_mask.shape[2]
     
-    gt_mask = np.where(gt_mask>0,1,0)
-    pred_mask = np.where(pred_mask>0,1,0)
+    gt_mask[gt_mask>0] = 1
+    pred_mask[pred_mask>0] = 1
+    labels = np.zeros([gt_mask.shape[0], gt_mask.shape[1]])
+    y_pred = np.zeros([gt_mask.shape[0], gt_mask.shape[1]])
+
     for k in range(true_objects):
-        gt_mask[:,:,k] = gt_mask[:,:,k]*(k+1)
+        labels += gt_mask[:,:,k]*(k+1)
         
     for k in range(pred_objects):
-        pred_mask[:,:,k] = pred_mask[:,:,k]*(k+1)
-    
-    labels = np.sum(gt_mask,axis=2)
-    y_pred = np.sum(pred_mask,axis=2)
+        y_pred += pred_mask[:,:,k]*(k+1)
  
     # Compute intersection between all objects
     intersection = np.histogram2d(labels.flatten(), y_pred.flatten(), bins=(true_objects+1, pred_objects+1))[0]
@@ -711,11 +711,15 @@ def compute_mask_ap(gt_mask,pred_mask, pred_scores,iou_threshold=0.5):
     return tp*1./(tp + fp + fn)
 
 def sweep_iou_mask_ap(gt_mask,pred_mask, pred_scores):
-    iou_thresholds = np.arange(0.5,1,0.05)
-    ap = []
-    for iou_threshold in iou_thresholds:
-        ap.append(compute_mask_ap(gt_mask,pred_mask, pred_scores, iou_threshold=iou_threshold))
-    return np.mean(ap)
+
+    if pred_mask.shape[0] == gt_mask.shape[0] and pred_mask.shape[1] == gt_mask.shape[1]:
+        iou_thresholds = np.arange(0.5,1,0.05)
+        ap = []
+        for iou_threshold in iou_thresholds:
+            ap.append(compute_mask_ap(gt_mask,pred_mask, pred_scores, iou_threshold=iou_threshold))
+        return np.mean(ap)
+    else:
+        return 0
 
 def deoverlap_masks(masks):
     # masks HxWxI
