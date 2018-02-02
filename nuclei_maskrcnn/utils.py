@@ -460,7 +460,8 @@ def resize_mask(mask, scale, padding):
     """
     h, w = mask.shape[:2]
     mask = scipy.ndimage.zoom(mask, zoom=[scale, scale, 1], order=0)
-    mask = np.pad(mask, padding, mode='constant', constant_values=0)
+    if padding:
+        mask = np.pad(mask, padding, mode='constant', constant_values=0)
     return mask
 
 

@@ -68,7 +68,7 @@ class Config(object):
     RPN_ANCHOR_STRIDE = 1
 
     # Non-max suppression threshold to filter RPN proposals.
-    # You can reduce this during training to generate more propsals.
+    # You can reduce this during training to generate more proposals.
     RPN_NMS_THRESHOLD = 0.7
 
     # How many anchors per image to use for RPN training
