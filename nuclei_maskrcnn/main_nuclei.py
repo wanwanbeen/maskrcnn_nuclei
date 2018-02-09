@@ -29,28 +29,22 @@ TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
 TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
 TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
-train_flag = True
+train_flag = False
 
 ###########################################
 # Training Config
 ###########################################
 
-# 20180131:
-# RPN_ANCHOR_SCALES=(16,32,64,128);
-# RPN_TRAIN_ANCHORS_PER_IMAGE=256;
-# DETECTION_MAX_INSTANCES=300;
-# TRAIN_ROIS_PER_IMAGE=256
-
 class TrainingConfig(Config):
 
     NAME = "nuclei_train"
-    IMAGES_PER_GPU = 2
+    IMAGES_PER_GPU = 1
     GPU_COUNT = 1
 
     # Number of classes (only nuclei and bg)
@@ -63,14 +57,13 @@ class TrainingConfig(Config):
     STEPS_PER_EPOCH = 1064
     MAX_GT_INSTANCES = 400
 
+    RPN_ANCHOR_RATIOS = [0.5, 1, 2]
     RPN_ANCHOR_SCALES = (16, 32, 64, 128)
 
-    RPN_TRAIN_ANCHORS_PER_IMAGE = 256
+    RPN_TRAIN_ANCHORS_PER_IMAGE = 1024
+    TRAIN_ROIS_PER_IMAGE = 1024
 
     DETECTION_MAX_INSTANCES = 300
-
-    TRAIN_ROIS_PER_IMAGE = 256
-
     RPN_NMS_THRESHOLD = 0.7
 
     IMAGE_PADDING = True
@@ -187,7 +180,7 @@ model = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=M
 # Path to saved weights: either set a specific path or find last trained weights
 # model_path = os.path.join(ROOT_DIR, ".h5 file name here")
 model_path = model.find_last()[1]
-# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180131T1425/mask_rcnn_nuclei_train_0018.h5'
+# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180206T0015/mask_rcnn_nuclei_train_0023.h5'
 # Load trained weights (fill in path to trained weights here)
 assert model_path != "", "Provide path to trained weights"
 print("Loading weights from ", model_path)
