@@ -14,11 +14,11 @@ import time
 
 from config import Config
 import utils
-import model as modellib
+import weight_model as modellib
 
 # Directory of the project and models
 ROOT_DIR = os.getcwd()
-MODEL_DIR = os.path.join(ROOT_DIR, "logs")
+MODEL_DIR = os.path.join(ROOT_DIR, "logs_tmp")
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 if not os.path.exists(COCO_MODEL_PATH):
     utils.download_trained_weights(COCO_MODEL_PATH)
@@ -29,13 +29,13 @@ TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
 TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
 TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
-train_flag = False
+train_flag = True
 
 ###########################################
 # Training Config
@@ -44,28 +44,25 @@ train_flag = False
 class TrainingConfig(Config):
 
     NAME = "nuclei_train"
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 2
     GPU_COUNT = 1
 
     # Number of classes (only nuclei and bg)
     NUM_CLASSES = 1 + 1
 
     IMAGE_MIN_DIM = 256
-    IMAGE_MAX_DIM = 1024
+    IMAGE_MAX_DIM = 960
 
-    VALIDATION_STEPS = 136
+    VALIDATION_STEPS = 3
     STEPS_PER_EPOCH = 1064
     MAX_GT_INSTANCES = 400
 
     RPN_ANCHOR_RATIOS = [0.5, 1, 2]
     RPN_ANCHOR_SCALES = (16, 32, 64, 128)
-
-    RPN_TRAIN_ANCHORS_PER_IMAGE = 1024
-    TRAIN_ROIS_PER_IMAGE = 1024
-
+    RPN_TRAIN_ANCHORS_PER_IMAGE = 256
+    TRAIN_ROIS_PER_IMAGE = 256
     DETECTION_MAX_INSTANCES = 300
     RPN_NMS_THRESHOLD = 0.7
-
     IMAGE_PADDING = True
 
 config = TrainingConfig()
