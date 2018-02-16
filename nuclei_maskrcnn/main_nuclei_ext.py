@@ -17,9 +17,12 @@ from config import Config
 import utils
 import model as modellib
 
+GPU_option = 0
+log_name = "logs_par" if GPU_option else "logs"
+
 # Directory of the project and models
 ROOT_DIR = os.getcwd()
-MODEL_DIR = os.path.join(ROOT_DIR, "logs")
+MODEL_DIR = os.path.join(ROOT_DIR, log_name)
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 if not os.path.exists(COCO_MODEL_PATH):
     utils.download_trained_weights(COCO_MODEL_PATH)
@@ -33,19 +36,19 @@ TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
 TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
 TEST_VAL_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_val")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU_option)
 
 import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
 train_flag = True
-train_head = True
+train_head = False
 train_all  = True
 vsave_flag = False
 
-epoch_number_init = 8
-epoch_number_iter = 10
+epoch_number_init = 6
+epoch_number_iter = 6
 
 ###########################################
 # Training Config
@@ -238,10 +241,11 @@ if train_flag:
     # Fine tune all layers
     if train_all:
         model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
-        os.remove(model.find_last()[1])
-        model_path = model.find_last()[1]
+        # os.remove(model.find_last()[1])
+        # model_path = model.find_last()[1]
+        model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0006.h5'
         model_epoch = int(model_path.split('/')[-1].split('.')[0][-4:])
-        model.load_weights(model.find_last()[1], by_name=True)
+        model.load_weights(model_path, by_name=True)
         val_mAP = []
         epoch_init = model_epoch + epoch_number_init
         epoch_add = 0
@@ -261,6 +265,7 @@ if train_flag:
 model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
 os.remove(model_inf.find_last()[1])
 model_path = model_inf.find_last()[1]
+# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0019.h5'
 assert model_path != "", "Provide path to trained weights"
 print("Loading weights from ", model_path)
 model_inf.load_weights(model_path, by_name=True)

@@ -11,14 +11,18 @@ from skimage.color import gray2rgb, label2rgb
 from sklearn.model_selection import train_test_split
 import pandas as pd
 import time
+import nibabel as nib
 
 from config import Config
 import utils
-import weight_model as modellib
+import model as modellib
+
+GPU_option = 1
+log_name = "logs_par" if GPU_option else "logs"
 
 # Directory of the project and models
 ROOT_DIR = os.getcwd()
-MODEL_DIR = os.path.join(ROOT_DIR, "logs_tmp")
+MODEL_DIR = os.path.join(ROOT_DIR, log_name)
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 if not os.path.exists(COCO_MODEL_PATH):
     utils.download_trained_weights(COCO_MODEL_PATH)
@@ -29,13 +33,13 @@ TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
 TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
 TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU_option)
 
 import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
-train_flag = True
+train_flag = False
 
 ###########################################
 # Training Config
@@ -171,13 +175,16 @@ class InferenceConfig(TrainingConfig):
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
 
+    DETECTION_MAX_INSTANCES = 1000
+    DETECTION_MIN_CONFIDENCE = 0.5
+
 inference_config = InferenceConfig()
 model = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
 
 # Path to saved weights: either set a specific path or find last trained weights
 # model_path = os.path.join(ROOT_DIR, ".h5 file name here")
-model_path = model.find_last()[1]
-# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180206T0015/mask_rcnn_nuclei_train_0023.h5'
+# model_path = model.find_last()[1]
+model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180206T0015/mask_rcnn_nuclei_train_0023.h5'
 # Load trained weights (fill in path to trained weights here)
 assert model_path != "", "Provide path to trained weights"
 print("Loading weights from ", model_path)
@@ -197,18 +204,20 @@ if not os.path.exists(TEST_VAL_MASK_SAVE_PATH + '/' + model_name):
 APs = []
 for image_id in dataset_val.image_ids:
     # Load image and ground truth data
-    image, image_meta, gt_class_id, gt_bbox, gt_mask = \
-        modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
+    image = dataset_val.load_image(image_id)
+    gt_mask, _ = dataset_val.load_mask(image_id)
+    # image, image_meta, gt_class_id, gt_bbox, gt_mask = \
+    #     modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
     # Run object detection
     t = time.time()
     results = model.detect([image], verbose=0)
     t2 = time.time()
-    print(t2-t)
+    # print(t2-t)
     r = results[0]
     # Compute AP
     AP = utils.sweep_iou_mask_ap(gt_mask, r["masks"], r["scores"])
     t3 = time.time()
-    print(t3-t2)
+    # print(t3-t2)
     APs.append(AP)
     print np.mean(APs)
 
@@ -223,6 +232,10 @@ for image_id in dataset_val.image_ids:
         rmaskcollapse = rmaskcollapse + masks[:, :, i] * (i + 1)
     rmaskcollapse = label2rgb(rmaskcollapse, bg_label=0)
 
+    nib.Nifti1Image(r["masks"], np.diag([1, 2, 3, 1])).to_filename(
+        TEST_VAL_MASK_SAVE_PATH + '/' + model_name + '/' + train_id + '_rmask.nii.gz')
+    nib.Nifti1Image(r["scores"], np.diag([1, 2, 3, 1])).to_filename(
+        TEST_VAL_MASK_SAVE_PATH + '/' + model_name + '/' + train_id + '_rscore.nii.gz')
     skimage.io.imsave(TEST_VAL_MASK_SAVE_PATH + '/' + model_name + '/ap_' + '%.2f' % AP + '_' + train_id + '_mask.png',
                       np.concatenate((rmaskcollapse_gt, image / 255., rmaskcollapse), axis=1))
 print("mAP: ", np.mean(APs))
