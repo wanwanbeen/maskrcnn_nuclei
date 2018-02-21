@@ -318,7 +318,7 @@ class ProposalLayer(KE.Layer):
 ############################################################
 
 def log2_graph(x):
-    """Implementatin of Log2. TF doesn't have a native implemenation."""
+    """Implementatin of Log2. TF doesn't have a native implementation."""
     return tf.log(x) / tf.log(2.0)
 
 
@@ -327,7 +327,7 @@ class PyramidROIAlign(KE.Layer):
 
     Params:
     - pool_shape: [height, width] of the output pooled regions. Usually [7, 7]
-    - image_shape: [height, width, chanells]. Shape of input image in pixels
+    - image_shape: [height, width, channels]. Shape of input image in pixels
 
     Inputs:
     - boxes: [batch, num_boxes, (y1, x1, y2, x2)] in normalized
