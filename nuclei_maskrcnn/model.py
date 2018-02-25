@@ -798,7 +798,7 @@ def rpn_graph(feature_map, anchors_per_location, anchor_stride):
         rpn_bbox: [batch, H, W, (dy, dx, log(dh), log(dw))] Deltas to be
                   applied to anchors.
     """
-    # TODO: check if stride of 2 causes alignment issues if the featuremap
+    # TODO: check if stride of 2 causes alignment issues if the feature map
     #       is not even.
     # Shared convolutional base of the RPN
     shared = KL.Conv2D(512, (3, 3), padding='same', activation='relu',
