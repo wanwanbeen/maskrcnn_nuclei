@@ -594,7 +594,7 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
 
 
 class DetectionTargetLayer(KE.Layer):
-    """Subsamples proposals and generates target box refinment, class_ids,
+    """Subsamples proposals and generates target box refinement, class_ids,
     and masks for each.
 
     Inputs:
