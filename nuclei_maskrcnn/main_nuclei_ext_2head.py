@@ -17,7 +17,7 @@ from config import Config
 import utils
 import model as modellib
 
-GPU_option = 1
+GPU_option = 0
 log_name = "logs_par" if GPU_option else "logs"
 
 # Directory of the project and models
@@ -47,8 +47,8 @@ train_head = False
 train_all  = True
 vsave_flag = False
 
-epoch_number_init = 8
-epoch_number_iter = 0
+epoch_number_init = 6
+epoch_number_iter = 6
 
 ###########################################
 # Training Config
@@ -72,9 +72,8 @@ class TrainingConfig(Config):
     TRAIN_ROIS_PER_IMAGE = 256
     MAX_GT_INSTANCES = 400
     DETECTION_MAX_INSTANCES = 300
-    RPN_NMS_THRESHOLD = 0.5
+    RPN_NMS_THRESHOLD = 0.7
     IMAGE_PADDING = True
-    # USE_MINI_MASK = False
 
 config = TrainingConfig()
 config.display()
@@ -259,12 +258,47 @@ if train_flag:
             model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init+epoch_add, layers='all')
         del model
 
+    # Train two head branches
+    if train_2head:
+        model_path = model.find_last()[1]
+        # model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0015.h5'
+
+        model_color = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
+        model_color.load_weights(model_path, by_name=True)
+        val_mAP = []
+        epoch_init = epoch_number_init
+        epoch_add  = 0
+        model_gray.train(dataset_color_train, dataset_color_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init, layers='heads')
+        while epoch_add < epoch_number_iter:
+            val_mAP.append(compute_mAP_val())
+            if epoch_add >= 2 and val_mAP[-1] < val_mAP[-2] and val_mAP[-1] < val_mAP[-3]:
+                break
+            epoch_add += 1
+            model_color.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init+epoch_add, layers='heads')
+
+        model_gray = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
+        model_gray.load_weights(model_path, by_name=True)
+        val_mAP = []
+        epoch_init = epoch_number_init
+        epoch_add = 0
+        model_gray.train(dataset_color_train, dataset_gray_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init,
+                         layers='heads')
+        while epoch_add < epoch_number_iter:
+            val_mAP.append(compute_mAP_val())
+            if epoch_add >= 2 and val_mAP[-1] < val_mAP[-2] and val_mAP[-1] < val_mAP[-3]:
+                break
+            epoch_add += 1
+            model_gray.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init + epoch_add,
+                        layers='heads')
+        del model
+
+
 ###########################################
 # Begin Testing
 ###########################################
 
 model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
-# os.remove(model_inf.find_last()[1])
+os.remove(model_inf.find_last()[1])
 model_path = model_inf.find_last()[1]
 # model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0019.h5'
 assert model_path != "", "Provide path to trained weights"

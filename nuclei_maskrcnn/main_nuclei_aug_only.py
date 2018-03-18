@@ -17,12 +17,9 @@ from config import Config
 import utils
 import model as modellib
 
-GPU_option = 1
-log_name = "logs_par" if GPU_option else "logs"
-
 # Directory of the project and models
 ROOT_DIR = os.getcwd()
-MODEL_DIR = os.path.join(ROOT_DIR, log_name)
+MODEL_DIR = os.path.join(ROOT_DIR, "logs")
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 if not os.path.exists(COCO_MODEL_PATH):
     utils.download_trained_weights(COCO_MODEL_PATH)
@@ -31,64 +28,58 @@ if not os.path.exists(COCO_MODEL_PATH):
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
 TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed")
-TRAIN_DATA_AUG_PATH = os.path.join(DATA_DIR,"augmented_new")
+TRAIN_DATA_AUG_PATH = os.path.join(DATA_DIR,"augmented")
 TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
 TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
-TEST_VAL_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_val")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU_option)
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
 train_flag = True
-train_head = False
-train_all  = True
-vsave_flag = False
-
-epoch_number_init = 8
-epoch_number_iter = 0
 
 ###########################################
 # Training Config
 ###########################################
 
+# 20180131:
+# RPN_ANCHOR_SCALES=(16,32,64,128);
+# RPN_TRAIN_ANCHORS_PER_IMAGE=256;
+# DETECTION_MAX_INSTANCES=300;
+# TRAIN_ROIS_PER_IMAGE=256
+
 class TrainingConfig(Config):
 
     NAME = "nuclei_train"
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 2
     GPU_COUNT = 1
 
+    # Number of classes (only nuclei and bg)
     NUM_CLASSES = 1 + 1
-    IMAGE_MIN_DIM = 256
-    IMAGE_MAX_DIM = 960
 
-    VALIDATION_STEPS = 3
-    STEPS_PER_EPOCH = 1898*2
+    IMAGE_MIN_DIM = 256
+    IMAGE_MAX_DIM = 1024
+
+    VALIDATION_STEPS = 136
+    STEPS_PER_EPOCH = 1406*2
+    MAX_GT_INSTANCES = 400
 
     RPN_ANCHOR_SCALES = (16, 32, 64, 128)
+
     RPN_TRAIN_ANCHORS_PER_IMAGE = 256
-    TRAIN_ROIS_PER_IMAGE = 256
-    MAX_GT_INSTANCES = 400
+
     DETECTION_MAX_INSTANCES = 300
-    RPN_NMS_THRESHOLD = 0.5
+
+    TRAIN_ROIS_PER_IMAGE = 256
+
+    RPN_NMS_THRESHOLD = 0.7
+
     IMAGE_PADDING = True
-    # USE_MINI_MASK = False
 
 config = TrainingConfig()
 config.display()
-
-###########################################
-# Inference Config
-###########################################
-
-class InferenceConfig(TrainingConfig):
-
-    GPU_COUNT = 1
-    IMAGES_PER_GPU = 1
-
-inference_config = InferenceConfig()
 
 ###########################################
 # Load Nuclei Dataset
@@ -96,6 +87,7 @@ inference_config = InferenceConfig()
 
 class NucleiDataset(utils.Dataset):
     def load_image(self, image_id):
+
         # Load the specified image and return a [H,W,3] Numpy array.
         image = skimage.io.imread(self.image_info[image_id]['path'])
         if image.ndim != 3:
@@ -103,12 +95,15 @@ class NucleiDataset(utils.Dataset):
         elif image.shape[2] == 4:
             image = image[:, :, :3]
         return image
+
     def load_mask(self, image_id):
+
         # Load the instance masks (a binary mask per instance)
         # return a a bool array of shape [H, W, instance count]
         mask_dir = os.path.dirname(self.image_info[image_id]['path']).replace('images', 'masks')
         mask_files = next(os.walk(mask_dir))[2]
         num_inst = len(mask_files)
+
         # get the shape of the image
         mask0 = skimage.io.imread(os.path.join(mask_dir, mask_files[0]))
         class_ids = np.ones(len(mask_files), np.int32)
@@ -121,7 +116,7 @@ class NucleiDataset(utils.Dataset):
 # TrainVal Split
 ###########################################
 
-h = open(os.path.join(ROOT_DIR, "image_group.pickle"))
+h = open('image_group.pickle')
 d = pickle.load(h)
 train_ids = []
 val_ids = []
@@ -139,7 +134,7 @@ for k in range(len(train_ids)):
 train_ids_ext = glob.glob(TRAIN_DATA_EXT_PATH+'/*/images/*.png')
 
 train_ids.extend(train_ids_aug)
-train_ids.extend(train_ids_ext)
+# train_ids.extend(train_ids_ext)
 
 print(len(train_ids_ext),len(train_ids_aug),len(train_ids))
 
@@ -167,112 +162,100 @@ for k, test_id in enumerate(test_ids):
 dataset_test.prepare()
 
 ###########################################
-# Validation Setting
-###########################################
-
-def compute_mAP_val():
-    model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
-    model_path = model_inf.find_last()[1]
-    assert model_path != "", "Provide path to trained weights"
-    print("Loading weights from ", model_path)
-    model_inf.load_weights(model_path, by_name=True)
-    model_name = model_path.split('/')[-2]
-    model_epoch = model_path.split('/')[-1].split('.')[0][-5:]
-    model_name = model_name + model_epoch
-
-    if vsave_flag and not os.path.exists(TEST_VAL_MASK_SAVE_PATH + '/' + model_name):
-        os.makedirs(TEST_VAL_MASK_SAVE_PATH + '/' + model_name)
-
-    APs = []
-    for image_id in dataset_val.image_ids:
-        image, image_meta, gt_class_id, gt_bbox, gt_mask = \
-            modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
-        results = model_inf.detect([image], verbose=0)
-        r = results[0]
-        AP = utils.sweep_iou_mask_ap(gt_mask, r["masks"], r["scores"])
-        APs.append(AP)
-        print np.mean(APs)
-
-        if vsave_flag:
-            train_id = dataset_val.image_info[image_id]['path'].split('/')[-1][:-4]
-            rmaskcollapse_gt = np.zeros((image.shape[0], image.shape[1]))
-            for i in range(gt_mask.shape[2]):
-                rmaskcollapse_gt = rmaskcollapse_gt + gt_mask[:, :, i] * (i + 1)
-            rmaskcollapse_gt = label2rgb(rmaskcollapse_gt, bg_label=0)
-            masks = r["masks"]
-            rmaskcollapse = np.zeros((image.shape[0], image.shape[1]))
-            for i in range(masks.shape[2]):
-                rmaskcollapse = rmaskcollapse + masks[:, :, i] * (i + 1)
-            rmaskcollapse = label2rgb(rmaskcollapse, bg_label=0)
-
-            skimage.io.imsave(
-                TEST_VAL_MASK_SAVE_PATH + '/' + model_name + '/ap_' + '%.2f' % AP + '_' + train_id + '_mask.png',
-                np.concatenate((rmaskcollapse_gt, image / 255., rmaskcollapse), axis=1))
-    print("mAP: ", np.mean(APs))
-    del model_inf
-    return np.mean(APs)
-
-###########################################
 # Begin Training
 ###########################################
 
+# Create model object in training mode.
+model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
+init_with = "last"  # imagenet, coco, or last
+
+if init_with == "imagenet":
+    model.load_weights(model.get_imagenet_weights(), by_name=True)
+elif init_with == "coco":
+    # Load weights trained on MS COCO, but skip layers that
+    # are different due to the different number of classes
+    model.load_weights(COCO_MODEL_PATH, by_name=True,
+                       exclude=["mrcnn_class_logits", "mrcnn_bbox_fc", "mrcnn_bbox", "mrcnn_mask"])
+elif init_with == "last":
+    # Load the last model you trained and continue training
+    model.load_weights(model.find_last()[1], by_name=True)
+
 if train_flag:
-
     # Train the head branches
-    if train_head:
-        model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
-        init_with = "coco"
-        if init_with == "imagenet":
-            model.load_weights(model.get_imagenet_weights(), by_name=True)
-        else:
-            model.load_weights(COCO_MODEL_PATH, by_name=True,
-                               exclude=["mrcnn_class_logits", "mrcnn_bbox_fc", "mrcnn_bbox", "mrcnn_mask"])
-        val_mAP = []
-        epoch_init = epoch_number_init
-        epoch_add  = 0
-        model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init, layers='heads')
-        while epoch_add < epoch_number_iter:
-            val_mAP.append(compute_mAP_val())
-            if epoch_add >= 2 and val_mAP[-1] < val_mAP[-2] and val_mAP[-1] < val_mAP[-3]:
-                break
-            epoch_add += 1
-            model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init+epoch_add, layers='heads')
-        del model
-
+    # model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=20, layers='heads')
     # Fine tune all layers
-    if train_all:
-        model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
-        # os.remove(model.find_last()[1])
-        model_path = model.find_last()[1]
-        # model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0015.h5'
-        model_epoch = int(model_path.split('/')[-1].split('.')[0][-4:])
-        model.load_weights(model_path, by_name=True)
-        val_mAP = []
-        epoch_init = model_epoch + 1
-        epoch_add = 0
-        # model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE/10., epochs=epoch_init, layers="all")
-        while epoch_add < epoch_number_iter:
-            val_mAP.append(compute_mAP_val())
-            if epoch_add >= 2 and val_mAP[-1] < val_mAP[-2] and val_mAP[-1] < val_mAP[-3]:
-                break
-            epoch_add += 1
-            model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init+epoch_add, layers='all')
-        del model
+    model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE/10., epochs=30, layers="all")
+
+###########################################
+# Inference Config
+###########################################
+
+class InferenceConfig(TrainingConfig):
+
+    # Running inference on one image at a time.
+    GPU_COUNT = 1
+    IMAGES_PER_GPU = 1
+
+inference_config = InferenceConfig()
+model = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
+
+# Path to saved weights: either set a specific path or find last trained weights
+# model_path = os.path.join(ROOT_DIR, ".h5 file name here")
+model_path = model.find_last()[1]
+# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180131T1425/mask_rcnn_nuclei_train_0018.h5'
+# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180202T1210/mask_rcnn_nuclei_train_0007.h5'
+# Load trained weights (fill in path to trained weights here)
+assert model_path != "", "Provide path to trained weights"
+print("Loading weights from ", model_path)
+model.load_weights(model_path, by_name=True)
+model_name = model_path.split('/')[-2]
+model_epoch = model_path.split('/')[-1].split('.')[0][-5:]
+model_name = model_name+model_epoch
+
+###########################################
+# Begin Validation
+###########################################
+
+TEST_VAL_MASK_SAVE_PATH = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_masks_val/'
+if not os.path.exists(TEST_VAL_MASK_SAVE_PATH + '/' + model_name):
+    os.makedirs(TEST_VAL_MASK_SAVE_PATH + '/' + model_name)
+
+APs = []
+for image_id in dataset_val.image_ids:
+    # Load image and ground truth data
+    image, image_meta, gt_class_id, gt_bbox, gt_mask = \
+        modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
+    # Run object detection
+    t = time.time()
+    results = model.detect([image], verbose=0)
+    t2 = time.time()
+    # print(t2-t)
+    r = results[0]
+    # Compute AP
+    AP = utils.sweep_iou_mask_ap(gt_mask, r["masks"], r["scores"])
+    t3 = time.time()
+    # print(t3-t2)
+    APs.append(AP)
+    print np.mean(APs)
+
+    train_id = dataset_val.image_info[image_id]['path'].split('/')[-1][:-4]
+    rmaskcollapse_gt = np.zeros((image.shape[0], image.shape[1]))
+    for i in range(gt_mask.shape[2]):
+        rmaskcollapse_gt = rmaskcollapse_gt + gt_mask[:, :, i] * (i + 1)
+    rmaskcollapse_gt = label2rgb(rmaskcollapse_gt, bg_label=0)
+    masks = r["masks"]
+    rmaskcollapse = np.zeros((image.shape[0], image.shape[1]))
+    for i in range(masks.shape[2]):
+        rmaskcollapse = rmaskcollapse + masks[:, :, i] * (i + 1)
+    rmaskcollapse = label2rgb(rmaskcollapse, bg_label=0)
+
+    skimage.io.imsave(TEST_VAL_MASK_SAVE_PATH + '/' + model_name + '/ap_' + '%.2f' % AP + '_' + train_id + '_mask.png',
+                      np.concatenate((rmaskcollapse_gt, image / 255., rmaskcollapse), axis=1))
+print("mAP: ", np.mean(APs))
 
 ###########################################
 # Begin Testing
 ###########################################
-
-model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
-# os.remove(model_inf.find_last()[1])
-model_path = model_inf.find_last()[1]
-# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0019.h5'
-assert model_path != "", "Provide path to trained weights"
-print("Loading weights from ", model_path)
-model_inf.load_weights(model_path, by_name=True)
-model_name = model_path.split('/')[-2]
-model_epoch = model_path.split('/')[-1].split('.')[0][-5:]
-model_name = model_name + model_epoch
 
 new_test_ids = []
 rles = []
@@ -281,7 +264,7 @@ if not os.path.exists(TEST_MASK_SAVE_PATH + '/' + model_name):
 
 for image_id in dataset_test.image_ids:
 
-    results = model_inf.detect([dataset_test.load_image(image_id)], verbose=0)
+    results = model.detect([dataset_test.load_image(image_id)], verbose=0)
     r = results[0]
     test_id = dataset_test.image_info[image_id]['path'].split('/')[-1][:-4]
 

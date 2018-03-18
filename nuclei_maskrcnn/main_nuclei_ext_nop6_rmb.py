@@ -15,7 +15,7 @@ import glob
 
 from config import Config
 import utils
-import model as modellib
+import model_nop6 as modellib
 
 GPU_option = 1
 log_name = "logs_par" if GPU_option else "logs"
@@ -42,13 +42,13 @@ import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
-train_flag = True
-train_head = False
+train_flag = False
+train_head = True
 train_all  = True
 vsave_flag = False
 
-epoch_number_init = 8
-epoch_number_iter = 0
+epoch_number_init = 6
+epoch_number_iter = 6
 
 ###########################################
 # Training Config
@@ -61,8 +61,8 @@ class TrainingConfig(Config):
     GPU_COUNT = 1
 
     NUM_CLASSES = 1 + 1
-    IMAGE_MIN_DIM = 256
-    IMAGE_MAX_DIM = 960
+    IMAGE_MIN_DIM = 128
+    IMAGE_MAX_DIM = 128
 
     VALIDATION_STEPS = 3
     STEPS_PER_EPOCH = 1898*2
@@ -74,7 +74,9 @@ class TrainingConfig(Config):
     DETECTION_MAX_INSTANCES = 300
     RPN_NMS_THRESHOLD = 0.5
     IMAGE_PADDING = True
-    # USE_MINI_MASK = False
+
+    BACKBONE_STRIDES = [4, 8, 16, 32]
+
 
 config = TrainingConfig()
 config.display()
@@ -84,11 +86,14 @@ config.display()
 ###########################################
 
 class InferenceConfig(TrainingConfig):
-
+    IMAGE_MIN_DIM = 256
+    IMAGE_MAX_DIM = 256
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
+    POST_NMS_ROIS_INFERENCE = 1000
 
 inference_config = InferenceConfig()
+inference_config.display()
 
 ###########################################
 # Load Nuclei Dataset
@@ -115,6 +120,8 @@ class NucleiDataset(utils.Dataset):
         mask = np.zeros([mask0.shape[0], mask0.shape[1], num_inst])
         for k in range(num_inst):
             mask[:, :, k] = skimage.io.imread(os.path.join(mask_dir, mask_files[k]))
+            if mask_files[k].split('.')[-2][-1]=='b':
+                class_ids[k] = -1
         return mask, class_ids
 
 ###########################################
@@ -150,18 +157,21 @@ random.shuffle(val_ids)
 test_ids = next(os.walk(TEST_DATA_PATH))[1]
 dataset_train = NucleiDataset()
 dataset_train.add_class("cell", 1, "nulcei")
+dataset_train.add_class("cell", -1, "boundary")
 for k, train_id in enumerate(train_ids):
     dataset_train.add_image("cell", k, train_id)
 dataset_train.prepare()
 
 dataset_val = NucleiDataset()
 dataset_val.add_class("cell", 1, "nulcei")
+dataset_val.add_class("cell", -1, "boundary")
 for k, val_id in enumerate(val_ids):
     dataset_val.add_image("cell", k, os.path.join(TRAIN_DATA_PATH, val_id, 'images', val_id + '.png'))
 dataset_val.prepare()
 
 dataset_test = NucleiDataset()
 dataset_test.add_class("cell", 1, "nulcei")
+dataset_test.add_class("cell", -1, "boundary")
 for k, test_id in enumerate(test_ids):
     dataset_test.add_image("cell", k, os.path.join(TEST_DATA_PATH, test_id, 'images', test_id + '.png'))
 dataset_test.prepare()
@@ -266,10 +276,11 @@ if train_flag:
 model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
 # os.remove(model_inf.find_last()[1])
 model_path = model_inf.find_last()[1]
-# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0019.h5'
+model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs_par/nuclei_train20180304T1124/mask_rcnn_nuclei_train_0002.h5'
 assert model_path != "", "Provide path to trained weights"
 print("Loading weights from ", model_path)
 model_inf.load_weights(model_path, by_name=True)
+model_inf.keras_model.summary()
 model_name = model_path.split('/')[-2]
 model_epoch = model_path.split('/')[-1].split('.')[0][-5:]
 model_name = model_name + model_epoch

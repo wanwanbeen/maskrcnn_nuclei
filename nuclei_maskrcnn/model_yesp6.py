@@ -1138,7 +1138,7 @@ def mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
 
 ############################################################
 #  Data Generator
-############################################################   
+############################################################
 
 def load_image_gt(dataset, config, image_id, augment=False,
                   use_mini_mask=False):
@@ -1806,16 +1806,22 @@ class MaskRCNN():
 
         # Image size must be dividable by 2 multiple times
         h, w = config.IMAGE_SHAPE[:2]
-        if h / 2**6 != int(h / 2**6) or w / 2**6 != int(w / 2**6):
-            raise Exception("Image size must be dividable by 2 at least 6 times "
+        tmt = 6 # two_multiple_times
+        if h / 2**tmt != int(h / 2**tmt) or w / 2**tmt != int(w / 2**tmt):
+            raise Exception("Image size must be dividable by 2 at least 5 times "
                             "to avoid fractions when downscaling and upscaling."
                             "For example, use 256, 320, 384, 448, 512, ... etc. ")
 
         # Inputs
-        input_image = KL.Input(
-            shape=config.IMAGE_SHAPE.tolist(), name="input_image")
-        input_image_meta = KL.Input(shape=[None], name="input_image_meta")
+        # input_image = KL.Input(
+        #     shape=config.IMAGE_SHAPE.tolist(), name="input_image")
+        # input_image_meta = KL.Input(shape=[None], name="input_image_meta")
         if mode == "training":
+            # Inputs
+            input_image = KL.Input(
+                shape=config.IMAGE_SHAPE.tolist(), name="input_image")
+            input_image_meta = KL.Input(shape=[None], name="input_image_meta")
+
             # RPN GT
             input_rpn_match = KL.Input(
                 shape=[None, 1], name="input_rpn_match", dtype=tf.int32)
@@ -1846,11 +1852,17 @@ class MaskRCNN():
                     shape=[config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1], None],
                     name="input_gt_masks", dtype=bool)
 
+        elif mode == "inference":
+            # Inputs
+            input_image = KL.Input(shape=config.IMAGE_SHAPE.tolist(), name="input_image_inf")
+            # input_image = KL.Input(shape=(None,None,3), name="input_image_inf")
+            input_image_meta = KL.Input(shape=[None], name="input_image_meta_inf")
+
         # Build the shared convolutional layers.
         # Bottom-up Layers
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
-        _, C2, C3, C4, C5 = resnet_graph(input_image, "resnet101", stage5=True)
+        _, C2, C3, C4, C5 = resnet_graph(input_image, "resnet50", stage5=True)
         # Top-down Layers
         # TODO: add assert to varify feature map sizes match what's in config
         P5 = KL.Conv2D(256, (1, 1), name='fpn_c5p5')(C5)
@@ -2031,6 +2043,32 @@ class MaskRCNN():
         if not checkpoints:
             return dir_name, None
         checkpoint = os.path.join(dir_name, checkpoints[-1])
+        return dir_name, checkpoint
+
+    def find_2nd2_last(self):
+        """Finds the last checkpoint file of the last trained model in the
+        model directory.
+        Returns:
+            log_dir: The directory where events and weights are saved
+            checkpoint_path: the path to the last checkpoint file
+        """
+        # Get directory names. Each directory corresponds to a model
+        dir_names = next(os.walk(self.model_dir))[1]
+        key = self.config.NAME.lower()
+        dir_names = filter(lambda f: f.startswith(key), dir_names)
+        dir_names = sorted(dir_names)
+        if not dir_names:
+            return None, None
+        # Pick last directory
+        dir_name = os.path.join(self.model_dir, dir_names[-1])
+        # Find the last checkpoint
+        checkpoints = next(os.walk(dir_name))[2]
+        checkpoints = filter(lambda f: f.startswith("mask_rcnn"), checkpoints)
+        checkpoints = sorted(checkpoints)
+        if not checkpoints:
+            return dir_name, None
+        assert len(checkpoints)>1, "less than two model files"
+        checkpoint = os.path.join(dir_name, checkpoints[-2])
         return dir_name, checkpoint
 
     def load_weights(self, filepath, by_name=False, exclude=None):
@@ -2421,7 +2459,7 @@ class MaskRCNN():
         checked: For internal use. A list of tensors that were already
                  searched to avoid loops in traversing the graph.
         """
-        
+
         checked = checked if checked is not None else []
         # Put a limit on how deep we go to avoid very long loops
         if len(checked) > 500:

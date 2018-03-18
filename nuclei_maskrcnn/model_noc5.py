@@ -260,18 +260,18 @@ class ProposalLayer(KE.Layer):
 
         # Improve performance by trimming to top anchors by score
         # and doing the rest on the smaller subset.
-        pre_nms_limit = min(6000, self.anchors.shape[0])
+        pre_nms_limit = min(1000, self.anchors.shape[0]) # c5 p5 128 change
         ix = tf.nn.top_k(scores, pre_nms_limit, sorted=True,
                          name="top_anchors").indices
         scores = utils.batch_slice([scores, ix], lambda x, y: tf.gather(x, y),
                                    self.config.IMAGES_PER_GPU)
         deltas = utils.batch_slice([deltas, ix], lambda x, y: tf.gather(x, y),
                                    self.config.IMAGES_PER_GPU)
-        print anchors.shape
+        # print anchors.shape
         anchors = utils.batch_slice(ix, lambda x: tf.gather(anchors, x),
                                     self.config.IMAGES_PER_GPU,
                                     names=["pre_nms_anchors"])
-        print anchors
+        # print anchors
 
         # Apply deltas to anchors to get refined anchors.
         # [batch, N, (y1, x1, y2, x2)]
@@ -365,14 +365,14 @@ class PyramidROIAlign(KE.Layer):
         image_area = tf.cast(
             self.image_shape[0] * self.image_shape[1], tf.float32)
         roi_level = log2_graph(tf.sqrt(h * w) / (224.0 / tf.sqrt(image_area)))
-        roi_level = tf.minimum(5, tf.maximum(
+        roi_level = tf.minimum(4, tf.maximum( # change with c5 p5
             2, 4 + tf.cast(tf.round(roi_level), tf.int32)))
         roi_level = tf.squeeze(roi_level, 2)
 
         # Loop through levels and apply ROI pooling to each. P2 to P5.
         pooled = []
         box_to_level = []
-        for i, level in enumerate(range(2, 6)):
+        for i, level in enumerate(range(2, 5)): # change with c5 p5
             ix = tf.where(tf.equal(roi_level, level))
             level_boxes = tf.gather_nd(boxes, ix)
 
@@ -1795,6 +1795,7 @@ class MaskRCNN():
         self.model_dir = model_dir
         self.set_log_dir()
         self.keras_model = self.build(mode=mode, config=config)
+        # print K.image_data_format(),K.image_dim_ordering()
 
     def build(self, mode, config):
         """Build Mask R-CNN architecture.
@@ -1806,16 +1807,17 @@ class MaskRCNN():
 
         # Image size must be dividable by 2 multiple times
         h, w = config.IMAGE_SHAPE[:2]
-        if h / 2**6 != int(h / 2**6) or w / 2**6 != int(w / 2**6):
-            raise Exception("Image size must be dividable by 2 at least 6 times "
+        twt = 4 # two multiply times
+        if h / 2**twt != int(h / 2**twt) or w / 2**twt != int(w / 2**twt):
+            raise Exception("Image size must be dividable by 2 at least 4 times "
                             "to avoid fractions when downscaling and upscaling."
                             "For example, use 256, 320, 384, 448, 512, ... etc. ")
 
-        # Inputs
-        input_image = KL.Input(
-            shape=config.IMAGE_SHAPE.tolist(), name="input_image")
-        input_image_meta = KL.Input(shape=[None], name="input_image_meta")
         if mode == "training":
+            # Inputs
+            input_image = KL.Input(
+                shape=config.IMAGE_SHAPE.tolist(), name="input_image")
+            input_image_meta = KL.Input(shape=[None], name="input_image_meta")
             # RPN GT
             input_rpn_match = KL.Input(
                 shape=[None, 1], name="input_rpn_match", dtype=tf.int32)
@@ -1846,17 +1848,24 @@ class MaskRCNN():
                     shape=[config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1], None],
                     name="input_gt_masks", dtype=bool)
 
+        elif mode == "inference":
+            # Inputs
+            input_image = KL.Input(shape=config.IMAGE_SHAPE.tolist(), name="input_image_inf")
+            # input_image = KL.Input(shape=(None,None,3), name="input_image_inf")
+            input_image_meta = KL.Input(shape=[None], name="input_image_meta_inf")
+
         # Build the shared convolutional layers.
         # Bottom-up Layers
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
-        _, C2, C3, C4, C5 = resnet_graph(input_image, "resnet101", stage5=True)
+        _, C2, C3, C4, _ = resnet_graph(input_image, "resnet101", stage5=False)
         # Top-down Layers
         # TODO: add assert to varify feature map sizes match what's in config
-        P5 = KL.Conv2D(256, (1, 1), name='fpn_c5p5')(C5)
-        P4 = KL.Add(name="fpn_p4add")([
-            KL.UpSampling2D(size=(2, 2), name="fpn_p5upsampled")(P5),
-            KL.Conv2D(256, (1, 1), name='fpn_c4p4')(C4)])
+        # P5 = KL.Conv2D(256, (1, 1), name='fpn_c5p5')(C5)
+        # P4 = KL.Add(name="fpn_p4add")([
+        #     KL.UpSampling2D(size=(2, 2), name="fpn_p5upsampled")(P5),
+        #     KL.Conv2D(256, (1, 1), name='fpn_c4p4')(C4)])
+        P4 = KL.Conv2D(256, (1, 1), name='fpn_c4p4')(C4)
         P3 = KL.Add(name="fpn_p3add")([
             KL.UpSampling2D(size=(2, 2), name="fpn_p4upsampled")(P4),
             KL.Conv2D(256, (1, 1), name='fpn_c3p3')(C3)])
@@ -1867,14 +1876,14 @@ class MaskRCNN():
         P2 = KL.Conv2D(256, (3, 3), padding="SAME", name="fpn_p2")(P2)
         P3 = KL.Conv2D(256, (3, 3), padding="SAME", name="fpn_p3")(P3)
         P4 = KL.Conv2D(256, (3, 3), padding="SAME", name="fpn_p4")(P4)
-        P5 = KL.Conv2D(256, (3, 3), padding="SAME", name="fpn_p5")(P5)
+        # P5 = KL.Conv2D(256, (3, 3), padding="SAME", name="fpn_p5")(P5)
         # P6 is used for the 5th anchor scale in RPN. Generated by
         # subsampling from P5 with stride of 2.
-        P6 = KL.MaxPooling2D(pool_size=(1, 1), strides=2, name="fpn_p6")(P5)
+        # P6 = KL.MaxPooling2D(pool_size=(1, 1), strides=2, name="fpn_p6")(P5)
 
         # Note that P6 is used in RPN, but not in the classifier heads.
-        rpn_feature_maps = [P2, P3, P4, P5, P6]
-        mrcnn_feature_maps = [P2, P3, P4, P5]
+        rpn_feature_maps = [P2, P3, P4] # , P5] #, P6]
+        mrcnn_feature_maps = [P2, P3, P4] # , P5]
 
         # Generate Anchors
         self.anchors = utils.generate_pyramid_anchors(config.RPN_ANCHOR_SCALES,
@@ -2031,6 +2040,32 @@ class MaskRCNN():
         if not checkpoints:
             return dir_name, None
         checkpoint = os.path.join(dir_name, checkpoints[-1])
+        return dir_name, checkpoint
+
+    def find_2nd2_last(self):
+        """Finds the last checkpoint file of the last trained model in the
+        model directory.
+        Returns:
+            log_dir: The directory where events and weights are saved
+            checkpoint_path: the path to the last checkpoint file
+        """
+        # Get directory names. Each directory corresponds to a model
+        dir_names = next(os.walk(self.model_dir))[1]
+        key = self.config.NAME.lower()
+        dir_names = filter(lambda f: f.startswith(key), dir_names)
+        dir_names = sorted(dir_names)
+        if not dir_names:
+            return None, None
+        # Pick last directory
+        dir_name = os.path.join(self.model_dir, dir_names[-1])
+        # Find the last checkpoint
+        checkpoints = next(os.walk(dir_name))[2]
+        checkpoints = filter(lambda f: f.startswith("mask_rcnn"), checkpoints)
+        checkpoints = sorted(checkpoints)
+        if not checkpoints:
+            return dir_name, None
+        assert len(checkpoints)>1, "less than two model files"
+        checkpoint = os.path.join(dir_name, checkpoints[-2])
         return dir_name, checkpoint
 
     def load_weights(self, filepath, by_name=False, exclude=None):

@@ -12,10 +12,11 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 import time
 import glob
+import gc
 
-from config import Config
+from config_var import Config
 import utils
-import model as modellib
+import model_noc5 as modellib
 
 GPU_option = 1
 log_name = "logs_par" if GPU_option else "logs"
@@ -30,8 +31,8 @@ if not os.path.exists(COCO_MODEL_PATH):
 # Directory of nuclei data
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
-TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed")
-TRAIN_DATA_AUG_PATH = os.path.join(DATA_DIR,"augmented_new")
+TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed_crop")
+TRAIN_DATA_AUG_PATH = os.path.join(DATA_DIR,"stage1_train_crop")
 TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
 TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
 TEST_VAL_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_val")
@@ -42,13 +43,16 @@ import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
-train_flag = True
-train_head = False
+
+import keras.backend as K
+
+train_flag = False
+train_head = True
 train_all  = True
 vsave_flag = False
 
-epoch_number_init = 8
-epoch_number_iter = 0
+epoch_number_init = 2
+epoch_number_iter = 6
 
 ###########################################
 # Training Config
@@ -57,26 +61,29 @@ epoch_number_iter = 0
 class TrainingConfig(Config):
 
     NAME = "nuclei_train"
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 8
     GPU_COUNT = 1
 
     NUM_CLASSES = 1 + 1
-    IMAGE_MIN_DIM = 256
-    IMAGE_MAX_DIM = 960
+    IMAGE_MIN_DIM = 128
+    # IMAGE_MAX_DIM = 128
 
     VALIDATION_STEPS = 3
-    STEPS_PER_EPOCH = 1898*2
+    STEPS_PER_EPOCH = 3000 # 23092 # 1898*2
 
     RPN_ANCHOR_SCALES = (16, 32, 64, 128)
     RPN_TRAIN_ANCHORS_PER_IMAGE = 256
     TRAIN_ROIS_PER_IMAGE = 256
-    MAX_GT_INSTANCES = 400
-    DETECTION_MAX_INSTANCES = 300
+    MAX_GT_INSTANCES = 100
+    DETECTION_MAX_INSTANCES = 100
     RPN_NMS_THRESHOLD = 0.5
     IMAGE_PADDING = True
-    # USE_MINI_MASK = False
 
-config = TrainingConfig()
+    POST_NMS_ROIS_TRAINING = 2000
+    BACKBONE_STRIDES = [4, 8, 16, 32]
+
+
+config = TrainingConfig(128)
 config.display()
 
 ###########################################
@@ -84,11 +91,16 @@ config.display()
 ###########################################
 
 class InferenceConfig(TrainingConfig):
-
+    IMAGE_MIN_DIM = 128
+    # IMAGE_MAX_DIM = 256
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
+    POST_NMS_ROIS_INFERENCE = 1000
+    MAX_GT_INSTANCES = 400
+    DETECTION_MAX_INSTANCES = 300
 
-inference_config = InferenceConfig()
+inference_config = InferenceConfig(256)
+inference_config.display()
 
 ###########################################
 # Load Nuclei Dataset
@@ -115,6 +127,8 @@ class NucleiDataset(utils.Dataset):
         mask = np.zeros([mask0.shape[0], mask0.shape[1], num_inst])
         for k in range(num_inst):
             mask[:, :, k] = skimage.io.imread(os.path.join(mask_dir, mask_files[k]))
+            if mask_files[k].split('.')[-2][-1]=='b':
+                class_ids[k] = -1
         return mask, class_ids
 
 ###########################################
@@ -134,8 +148,9 @@ train_ids_aug = []
 for train_id in train_ids:
     train_ids_aug.extend(glob.glob(TRAIN_DATA_AUG_PATH+'/'+train_id+'*/images/*.png'))
 
-for k in range(len(train_ids)):
-    train_ids[k] = os.path.join(TRAIN_DATA_PATH,train_ids[k],'images',train_ids[k]+'.png')
+train_ids = [] # the original files cropped are also in the aug folder, so [] here
+# for k in range(len(train_ids)):
+#     train_ids[k] = os.path.join(TRAIN_DATA_PATH,train_ids[k],'images',train_ids[k]+'.png')
 train_ids_ext = glob.glob(TRAIN_DATA_EXT_PATH+'/*/images/*.png')
 
 train_ids.extend(train_ids_aug)
@@ -150,18 +165,21 @@ random.shuffle(val_ids)
 test_ids = next(os.walk(TEST_DATA_PATH))[1]
 dataset_train = NucleiDataset()
 dataset_train.add_class("cell", 1, "nulcei")
+dataset_train.add_class("cell", -1, "boundary")
 for k, train_id in enumerate(train_ids):
     dataset_train.add_image("cell", k, train_id)
 dataset_train.prepare()
 
 dataset_val = NucleiDataset()
 dataset_val.add_class("cell", 1, "nulcei")
+dataset_val.add_class("cell", -1, "boundary")
 for k, val_id in enumerate(val_ids):
     dataset_val.add_image("cell", k, os.path.join(TRAIN_DATA_PATH, val_id, 'images', val_id + '.png'))
 dataset_val.prepare()
 
 dataset_test = NucleiDataset()
 dataset_test.add_class("cell", 1, "nulcei")
+dataset_test.add_class("cell", -1, "boundary")
 for k, test_id in enumerate(test_ids):
     dataset_test.add_image("cell", k, os.path.join(TEST_DATA_PATH, test_id, 'images', test_id + '.png'))
 dataset_test.prepare()
@@ -171,11 +189,10 @@ dataset_test.prepare()
 ###########################################
 
 def compute_mAP_val():
-    model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
-    model_path = model_inf.find_last()[1]
+    model_inf0 = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
+    model_path = model_inf0.find_last()[1]
+    model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs_par/nuclei_train20180304T1813/mask_rcnn_nuclei_train_0006.h5'
     assert model_path != "", "Provide path to trained weights"
-    print("Loading weights from ", model_path)
-    model_inf.load_weights(model_path, by_name=True)
     model_name = model_path.split('/')[-2]
     model_epoch = model_path.split('/')[-1].split('.')[0][-5:]
     model_name = model_name + model_epoch
@@ -185,10 +202,18 @@ def compute_mAP_val():
 
     APs = []
     for image_id in dataset_val.image_ids:
+        img_val = dataset_val.load_image(image_id)
+        img_max_dim = max(img_val.shape)
+        img_max_dim = np.int(np.ceil(img_max_dim * 1. / 32.) * 32.)
+        model_inf = modellib.MaskRCNN(mode="inference", config=InferenceConfig(img_max_dim), model_dir=MODEL_DIR)
+        model_inf.load_weights(model_path, by_name=True)
+        # model_inf.keras_model.summary()
         image, image_meta, gt_class_id, gt_bbox, gt_mask = \
             modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
+        print dataset_val.image_info[image_id]['path']
         results = model_inf.detect([image], verbose=0)
         r = results[0]
+        print img_max_dim, img_val.shape, image.shape, gt_mask.shape, r["masks"].shape
         AP = utils.sweep_iou_mask_ap(gt_mask, r["masks"], r["scores"])
         APs.append(AP)
         print np.mean(APs)
@@ -242,8 +267,7 @@ if train_flag:
     # Fine tune all layers
     if train_all:
         model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
-        # os.remove(model.find_last()[1])
-        model_path = model.find_last()[1]
+        model_path = model.find_2nd2_last()[1]
         # model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0015.h5'
         model_epoch = int(model_path.split('/')[-1].split('.')[0][-4:])
         model.load_weights(model_path, by_name=True)
@@ -259,29 +283,47 @@ if train_flag:
             model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init+epoch_add, layers='all')
         del model
 
+# compute_mAP_val()
+
 ###########################################
 # Begin Testing
 ###########################################
-
-model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
-# os.remove(model_inf.find_last()[1])
-model_path = model_inf.find_last()[1]
-# model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0019.h5'
-assert model_path != "", "Provide path to trained weights"
-print("Loading weights from ", model_path)
-model_inf.load_weights(model_path, by_name=True)
+model_inf0 = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
+model_path = model_inf0.find_2nd2_last()[1]
+model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs_par/nuclei_train20180304T1813/mask_rcnn_nuclei_train_0006.h5'
 model_name = model_path.split('/')[-2]
 model_epoch = model_path.split('/')[-1].split('.')[0][-5:]
 model_name = model_name + model_epoch
 
-new_test_ids = []
-rles = []
+# model_inf = modellib.MaskRCNN(mode="inference", config=InferenceConfig(1024), model_dir=MODEL_DIR)
+# # model_inf.keras_model.summary()
+# assert model_path != "", "Provide path to trained weights"
+# print("Loading weights from ", model_path)
+# model_inf.load_weights(model_path, by_name=True)
+
 if not os.path.exists(TEST_MASK_SAVE_PATH + '/' + model_name):
     os.makedirs(TEST_MASK_SAVE_PATH + '/' + model_name)
 
 for image_id in dataset_test.image_ids:
+    img_test = dataset_test.load_image(image_id)
+    img_max_dim = max(img_test.shape)
+    img_max_dim = np.int(np.ceil(img_max_dim*1./32.)*32.)
+    model_inf = modellib.MaskRCNN(mode="inference", config=InferenceConfig(img_max_dim), model_dir=MODEL_DIR)
+    # model_inf.keras_model.summary()
+    print dataset_test.image_info[image_id]['path']
+    assert model_path != "", "Provide path to trained weights"
+    print("Loading weights from ", model_path)
+    model_inf.load_weights(model_path, by_name=True)
 
-    results = model_inf.detect([dataset_test.load_image(image_id)], verbose=0)
+    new_test_ids = []
+    rles = []
+
+    results = model_inf.detect([img_test], verbose=0)
+    del model_inf
+    gc.collect()
+    if image_id>0 & image_id%10 == 0:
+        K.clear_session()
+
     r = results[0]
     test_id = dataset_test.image_info[image_id]['path'].split('/')[-1][:-4]
 

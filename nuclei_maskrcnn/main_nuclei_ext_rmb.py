@@ -17,7 +17,7 @@ from config import Config
 import utils
 import model as modellib
 
-GPU_option = 1
+GPU_option = 0
 log_name = "logs_par" if GPU_option else "logs"
 
 # Directory of the project and models
@@ -43,7 +43,7 @@ config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
 train_flag = True
-train_head = False
+train_head = True
 train_all  = True
 vsave_flag = False
 
@@ -115,6 +115,23 @@ class NucleiDataset(utils.Dataset):
         mask = np.zeros([mask0.shape[0], mask0.shape[1], num_inst])
         for k in range(num_inst):
             mask[:, :, k] = skimage.io.imread(os.path.join(mask_dir, mask_files[k]))
+            if np.sum(mask[0,:,k])+np.sum(mask[-1,:,k])+np.sum(mask[:,0,k])+np.sum(mask[:,-1,k]) > 0:
+                class_ids[k] = -1
+        return mask, class_ids
+
+class NucleiDataset_val(NucleiDataset):
+    def load_mask(self, image_id):
+        # Load the instance masks (a binary mask per instance)
+        # return a a bool array of shape [H, W, instance count]
+        mask_dir = os.path.dirname(self.image_info[image_id]['path']).replace('images', 'masks')
+        mask_files = next(os.walk(mask_dir))[2]
+        num_inst = len(mask_files)
+        # get the shape of the image
+        mask0 = skimage.io.imread(os.path.join(mask_dir, mask_files[0]))
+        class_ids = np.ones(len(mask_files), np.int32)
+        mask = np.zeros([mask0.shape[0], mask0.shape[1], num_inst])
+        for k in range(num_inst):
+            mask[:, :, k] = skimage.io.imread(os.path.join(mask_dir, mask_files[k]))
         return mask, class_ids
 
 ###########################################
@@ -150,17 +167,18 @@ random.shuffle(val_ids)
 test_ids = next(os.walk(TEST_DATA_PATH))[1]
 dataset_train = NucleiDataset()
 dataset_train.add_class("cell", 1, "nulcei")
+dataset_train.add_class("cell", -1, "boundary")
 for k, train_id in enumerate(train_ids):
     dataset_train.add_image("cell", k, train_id)
 dataset_train.prepare()
 
-dataset_val = NucleiDataset()
+dataset_val = NucleiDataset_val()
 dataset_val.add_class("cell", 1, "nulcei")
 for k, val_id in enumerate(val_ids):
     dataset_val.add_image("cell", k, os.path.join(TRAIN_DATA_PATH, val_id, 'images', val_id + '.png'))
 dataset_val.prepare()
 
-dataset_test = NucleiDataset()
+dataset_test = NucleiDataset_val()
 dataset_test.add_class("cell", 1, "nulcei")
 for k, test_id in enumerate(test_ids):
     dataset_test.add_image("cell", k, os.path.join(TEST_DATA_PATH, test_id, 'images', test_id + '.png'))

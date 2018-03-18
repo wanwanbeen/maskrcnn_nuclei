@@ -15,7 +15,7 @@ import glob
 
 from config import Config
 import utils
-import model as modellib
+import model_nop6 as modellib
 
 GPU_option = 1
 log_name = "logs_par" if GPU_option else "logs"
@@ -42,13 +42,13 @@ import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
-train_flag = True
-train_head = False
+train_flag = False
+train_head = True
 train_all  = True
 vsave_flag = False
 
-epoch_number_init = 8
-epoch_number_iter = 0
+epoch_number_init = 6
+epoch_number_iter = 6
 
 ###########################################
 # Training Config
@@ -74,7 +74,9 @@ class TrainingConfig(Config):
     DETECTION_MAX_INSTANCES = 300
     RPN_NMS_THRESHOLD = 0.5
     IMAGE_PADDING = True
-    # USE_MINI_MASK = False
+
+    BACKBONE_STRIDES = [4, 8, 16, 32]
+
 
 config = TrainingConfig()
 config.display()
@@ -187,6 +189,7 @@ def compute_mAP_val():
     for image_id in dataset_val.image_ids:
         image, image_meta, gt_class_id, gt_bbox, gt_mask = \
             modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
+        print image.shape
         results = model_inf.detect([image], verbose=0)
         r = results[0]
         AP = utils.sweep_iou_mask_ap(gt_mask, r["masks"], r["scores"])
