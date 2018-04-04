@@ -12,10 +12,11 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 import time
 import glob
+import gc
 
-from config import Config
+from config_var import Config
 import utils
-import model_nop6 as modellib
+import model_nuclei as modellib
 
 GPU_option = 1
 log_name = "logs_par" if GPU_option else "logs"
@@ -30,8 +31,8 @@ if not os.path.exists(COCO_MODEL_PATH):
 # Directory of nuclei data
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
-TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed")
-TRAIN_DATA_AUG_PATH = os.path.join(DATA_DIR,"augmented_new")
+TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed_0329")
+TRAIN_DATA_AUG_PATH = os.path.join(DATA_DIR,"augmented_0326")
 TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
 TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
 TEST_VAL_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_val")
@@ -42,14 +43,19 @@ import tensorflow as tf
 config_tf = tf.ConfigProto()
 config_tf.gpu_options.allow_growth = True
 session = tf.Session(config=config_tf)
+
+from keras import backend as K
+
 train_flag = False
 train_head = True
 train_all  = True
 vsave_flag = False
 
-epoch_number_init = 6
-epoch_number_iter = 6
+epoch_number_init = 10
+epoch_number_iter = 0
 
+thresh_rmask_size = 625
+upscale_method = 'resize_image' # 'reconfig' ''
 ###########################################
 # Training Config
 ###########################################
@@ -57,29 +63,42 @@ epoch_number_iter = 6
 class TrainingConfig(Config):
 
     NAME = "nuclei_train"
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 4
     GPU_COUNT = 1
 
     NUM_CLASSES = 1 + 1
     IMAGE_MIN_DIM = 256
-    IMAGE_MAX_DIM = 960
+    IMAGE_MAX_DIM = 512
 
     VALIDATION_STEPS = 3
-    STEPS_PER_EPOCH = 1898*2
+    STEPS_PER_EPOCH = 1712/IMAGES_PER_GPU
 
     RPN_ANCHOR_SCALES = (16, 32, 64, 128)
     RPN_TRAIN_ANCHORS_PER_IMAGE = 256
     TRAIN_ROIS_PER_IMAGE = 256
     MAX_GT_INSTANCES = 400
     DETECTION_MAX_INSTANCES = 300
-    RPN_NMS_THRESHOLD = 0.5
+    RPN_NMS_THRESHOLD = 0.7
     IMAGE_PADDING = True
+    # USE_MINI_MASK = False
+    # Pooled ROIs
+    POOL_SIZE = 7
+    MASK_POOL_SIZE = 14
+    MASK_SHAPE = [28, 28]
 
-    BACKBONE_STRIDES = [4, 8, 16, 32]
+    LEARNING_RATE = 0.0002
 
+    BACKBONE_NAME = 'resnet50'
 
-config = TrainingConfig()
-config.display()
+config_head = TrainingConfig(512,256)
+config_head.display()
+
+class TrainingAllConfig(TrainingConfig):
+    GPU_COUNT = 1
+    IMAGES_PER_GPU = 2
+    STEPS_PER_EPOCH = 1712/IMAGES_PER_GPU
+    
+config_all = TrainingAllConfig(512,256)
 
 ###########################################
 # Inference Config
@@ -87,10 +106,13 @@ config.display()
 
 class InferenceConfig(TrainingConfig):
 
+    IMAGE_MIN_DIM = 256
+    IMAGE_MAX_DIM = 1024
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
+    DETECTION_MAX_INSTANCES = 1000
 
-inference_config = InferenceConfig()
+inference_config = InferenceConfig(1024,256)
 
 ###########################################
 # Load Nuclei Dataset
@@ -123,35 +145,32 @@ class NucleiDataset(utils.Dataset):
 # TrainVal Split
 ###########################################
 
-h = open(os.path.join(ROOT_DIR, "image_group.pickle"))
+h = open(os.path.join(ROOT_DIR, "image_group_train.pickle"))
 d = pickle.load(h)
 train_ids = []
 val_ids = []
-for k in range(1,7):
+rep_id = [2,2,8,6,4,4,8]
+for k in range(1,8):
     train_id, val_id = train_test_split(d[k],train_size=0.8, random_state=1234)
-    train_ids.extend(train_id)
+    for iter_tmp in range(rep_id[k-1]):
+        train_ids.extend(train_id)
     val_ids.extend(val_id)
-
-train_ids_aug = []
-for train_id in train_ids:
-    train_ids_aug.extend(glob.glob(TRAIN_DATA_AUG_PATH+'/'+train_id+'*/images/*.png'))
 
 for k in range(len(train_ids)):
     train_ids[k] = os.path.join(TRAIN_DATA_PATH,train_ids[k],'images',train_ids[k]+'.png')
 train_ids_ext = glob.glob(TRAIN_DATA_EXT_PATH+'/*/images/*.png')
-
-train_ids.extend(train_ids_aug)
 train_ids.extend(train_ids_ext)
+test_ids = next(os.walk(TEST_DATA_PATH))[1]
 
-print(len(train_ids_ext),len(train_ids_aug),len(train_ids))
+print(len(train_ids),len(train_ids_ext))
 
 random.seed(1234)
 random.shuffle(train_ids)
 random.shuffle(val_ids)
 
-test_ids = next(os.walk(TEST_DATA_PATH))[1]
 dataset_train = NucleiDataset()
 dataset_train.add_class("cell", 1, "nulcei")
+dataset_train.add_class("cell", -1, "boundary")
 for k, train_id in enumerate(train_ids):
     dataset_train.add_image("cell", k, train_id)
 dataset_train.prepare()
@@ -173,8 +192,9 @@ dataset_test.prepare()
 ###########################################
 
 def compute_mAP_val():
-    model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
+    model_inf = modellib.MaskRCNN(mode="inference", config=InferenceConfig(2048,256), model_dir=MODEL_DIR)
     model_path = model_inf.find_last()[1]
+    model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180330T2330/mask_rcnn_nuclei_train_0020_test.h5'
     assert model_path != "", "Provide path to trained weights"
     print("Loading weights from ", model_path)
     model_inf.load_weights(model_path, by_name=True)
@@ -186,12 +206,37 @@ def compute_mAP_val():
         os.makedirs(TEST_VAL_MASK_SAVE_PATH + '/' + model_name)
 
     APs = []
+    upscale_redo_image_ids = []
+    upscale_redo_mean_rmask_size = []
     for image_id in dataset_val.image_ids:
         image, image_meta, gt_class_id, gt_bbox, gt_mask = \
-            modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
-        print image.shape
+            modellib.load_image_gt_noresize(dataset_val, InferenceConfig(2048,  256), image_id, use_mini_mask=False)
         results = model_inf.detect([image], verbose=0)
         r = results[0]
+
+        rmask_size = np.zeros((r['masks'].shape[2], 1))
+        for i in range(r['masks'].shape[2]):
+            rmask_size[i] = np.count_nonzero(r['masks'][:, :, i])
+
+        mean_rmask_size = np.mean(rmask_size)
+        print mean_rmask_size, max(image.shape)
+        if (mean_rmask_size < thresh_rmask_size) & (max(image.shape) < 2048):
+            upscale_redo_image_ids.append(image_id)
+            upscale_redo_mean_rmask_size.append(mean_rmask_size)
+            # change the input image
+            if upscale_method is 'resize_image':
+                scale_factor = min(np.sqrt(thresh_rmask_size * 1.0 / mean_rmask_size), 2048. / max(image.shape))
+                image, _, scale, _ = utils.resize_image(image,
+                                                             min_dim=int(scale_factor * min(image.shape)),
+                                                             max_dim=int(scale_factor * max(image.shape)),
+                                                             padding=False)
+                results = model_inf.detect([image], verbose=0)
+                r = results[0]
+                # then has to convert the detected mask explicitly
+                r['masks'] = utils.resize_mask(r['masks'], 1. / scale, 0)
+            elif upscale_method is 'reconfig':
+                continue
+
         AP = utils.sweep_iou_mask_ap(gt_mask, r["masks"], r["scores"])
         APs.append(AP)
         print np.mean(APs)
@@ -209,11 +254,43 @@ def compute_mAP_val():
             rmaskcollapse = label2rgb(rmaskcollapse, bg_label=0)
 
             skimage.io.imsave(
-                TEST_VAL_MASK_SAVE_PATH + '/' + model_name + '/ap_' + '%.2f' % AP + '_' + train_id + '_mask.png',
+                TEST_VAL_MASK_SAVE_PATH + '/' + model_name + upscale_method+'/ap_' + '%.2f' % AP + '_' + train_id + '_mask.png',
                 np.concatenate((rmaskcollapse_gt, image / 255., rmaskcollapse), axis=1))
-    print("mAP: ", np.mean(APs))
+
     del model_inf
-    return np.mean(APs)
+    for i in range(10): gc.collect()
+    K.clear_session()
+
+    # change the model configureation
+    if upscale_method is 'reconfig':
+        model_inf = modellib.MaskRCNN(mode="inference", config=InferenceConfig(1024, 512), model_dir=MODEL_DIR)
+        model_inf.load_weights(model_path, by_name=True)
+        for image_id in upscale_redo_image_ids:
+            image, image_meta, gt_class_id, gt_bbox, gt_mask = \
+                modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
+            results = model_inf.detect([image], verbose=0)
+            r = results[0]
+
+            if vsave_flag:
+                train_id = dataset_val.image_info[image_id]['path'].split('/')[-1][:-4]
+                rmaskcollapse_gt = np.zeros((image.shape[0], image.shape[1]))
+                for i in range(gt_mask.shape[2]):
+                    rmaskcollapse_gt = rmaskcollapse_gt + gt_mask[:, :, i] * (i + 1)
+                rmaskcollapse_gt = label2rgb(rmaskcollapse_gt, bg_label=0)
+                masks = r["masks"]
+                rmaskcollapse = np.zeros((image.shape[0], image.shape[1]))
+                for i in range(masks.shape[2]):
+                    rmaskcollapse = rmaskcollapse + masks[:, :, i] * (i + 1)
+                rmaskcollapse = label2rgb(rmaskcollapse, bg_label=0)
+                skimage.io.imsave(
+                    TEST_VAL_MASK_SAVE_PATH + '/' + model_name + upscale_method + '/ap_' + '%.2f' % AP + '_' + train_id + '_mask.png',
+                    np.concatenate((rmaskcollapse_gt, image / 255., rmaskcollapse), axis=1))
+
+        AP = utils.sweep_iou_mask_ap(gt_mask, r["masks"], r["scores"])
+        APs.append(AP)
+        print np.mean(APs)
+
+    print("mAP: ", np.mean(APs))
 
 ###########################################
 # Begin Training
@@ -223,7 +300,7 @@ if train_flag:
 
     # Train the head branches
     if train_head:
-        model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
+        model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config_head)
         init_with = "coco"
         if init_with == "imagenet":
             model.load_weights(model.get_imagenet_weights(), by_name=True)
@@ -233,43 +310,43 @@ if train_flag:
         val_mAP = []
         epoch_init = epoch_number_init
         epoch_add  = 0
-        model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init, layers='heads')
+        model.train(dataset_train, dataset_val, learning_rate=config_head.LEARNING_RATE, epochs=epoch_init, layers='heads')
         while epoch_add < epoch_number_iter:
             val_mAP.append(compute_mAP_val())
             if epoch_add >= 2 and val_mAP[-1] < val_mAP[-2] and val_mAP[-1] < val_mAP[-3]:
                 break
             epoch_add += 1
-            model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init+epoch_add, layers='heads')
+            model.train(dataset_train, dataset_val, learning_rate=config_head.LEARNING_RATE, epochs=epoch_init+epoch_add, layers='heads')
         del model
 
     # Fine tune all layers
     if train_all:
-        model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config)
-        # os.remove(model.find_last()[1])
+        model = modellib.MaskRCNN(mode="training", model_dir=MODEL_DIR, config=config_all)
         model_path = model.find_last()[1]
-        # model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0015.h5'
         model_epoch = int(model_path.split('/')[-1].split('.')[0][-4:])
         model.load_weights(model_path, by_name=True)
         val_mAP = []
-        epoch_init = model_epoch + 1
+        epoch_init = model_epoch + epoch_number_init
         epoch_add = 0
-        # model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE/10., epochs=epoch_init, layers="all")
+        model.train(dataset_train, dataset_val, learning_rate=config_all.LEARNING_RATE/10., epochs=epoch_init, layers="all")
         while epoch_add < epoch_number_iter:
             val_mAP.append(compute_mAP_val())
             if epoch_add >= 2 and val_mAP[-1] < val_mAP[-2] and val_mAP[-1] < val_mAP[-3]:
                 break
             epoch_add += 1
-            model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE, epochs=epoch_init+epoch_add, layers='all')
+            model.train(dataset_train, dataset_val, learning_rate=config_all.LEARNING_RATE/10., epochs=epoch_init+epoch_add, layers='all')
         del model
+
+compute_mAP_val()
 
 ###########################################
 # Begin Testing
 ###########################################
 
 model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
-# os.remove(model_inf.find_last()[1])
 model_path = model_inf.find_last()[1]
 # model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180211T2323/mask_rcnn_nuclei_train_0019.h5'
+model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180330T2330/mask_rcnn_nuclei_train_0020_test.h5'
 assert model_path != "", "Provide path to trained weights"
 print("Loading weights from ", model_path)
 model_inf.load_weights(model_path, by_name=True)
@@ -282,27 +359,81 @@ rles = []
 if not os.path.exists(TEST_MASK_SAVE_PATH + '/' + model_name):
     os.makedirs(TEST_MASK_SAVE_PATH + '/' + model_name)
 
+upscale_redo_image_ids = []
+upscale_redo_mean_rmask_size = []
 for image_id in dataset_test.image_ids:
-
-    results = model_inf.detect([dataset_test.load_image(image_id)], verbose=0)
-    r = results[0]
+    print image_id
+    test_image = dataset_test.load_image(image_id)
     test_id = dataset_test.image_info[image_id]['path'].split('/')[-1][:-4]
+
+    results = model_inf.detect([test_image], verbose=0)
+    r = results[0]
+
+    rmask_size=np.zeros((r['masks'].shape[2],1))
+    for i in range(r['masks'].shape[2]):
+        rmask_size[i] = np.count_nonzero(r['masks'][:,:,i])
+
+    mean_rmask_size = np.mean(rmask_size)
+    print mean_rmask_size, max(test_image.shape)
+    if (mean_rmask_size<thresh_rmask_size) & (max(test_image.shape)<2048):
+        upscale_redo_image_ids.append(iamge_id)
+        upscale_redo_mean_rmask_size.append(mean_rmask_size)
+        # change the input image
+        if upscale_method is 'resize_image':
+            scale_factor = min(np.sqrt(thresh_rmask_size * 1.0 / mean_rmask_size), 2048. / max(test_image.shape))
+            test_image, _, scale, _ = utils.resize_image(test_image, min_dim=int(scale_factor * min(test_image.shape)),
+                                                         max_dim=int(scale_factor * max(test_image.shape)),
+                                                         padding=False)
+            results = model_inf.detect([test_image], verbose=0)
+            r = results[0]
+            # then has to convert the detected mask explicitly
+            r['masks'] = utils.resize_mask(r['masks'], 1. / scale, 0)
+        elif upscale_method is 'reconfig':
+            continue
 
     rmaskcollapse = np.zeros((r['masks'].shape[0], r['masks'].shape[1]))
     for i in range(r['masks'].shape[2]):
         rmaskcollapse = rmaskcollapse + r['masks'][:, :, i] * (i + 1)
 
-    skimage.io.imsave(TEST_MASK_SAVE_PATH + '/' + model_name + '/' + test_id + '_mask.png',
+    skimage.io.imsave(TEST_MASK_SAVE_PATH + '/' + model_name + upscale_method+'/' + test_id + '_mask.png',
                       np.concatenate((dataset_test.load_image(image_id) / 255.,
                                       label2rgb(rmaskcollapse, bg_label=0)), axis=1))
-
+    np.save(TEST_MASK_SAVE_PATH + '/' + model_name + upscale_method+'/' + test_id + '_mask.npy',rmaskcollapse)
     for i in range(r['masks'].shape[2]):
         rle = list(utils.prob_to_rles(r['masks'][:, :, i]))
         rles.extend(rle)
         new_test_ids.append(test_id)
 
+del model_inf
+for i in range(10): gc.collect()
+K.clear_session()
+
+# change the model configureation
+if upscale_method is 'reconfig':
+    model_inf = modellib.MaskRCNN(mode="inference", config=InferenceConfig(1024,512), model_dir=MODEL_DIR)
+    model_inf.load_weights(model_path, by_name=True)
+    for image_id in upscale_redo_image_ids:
+        test_image = dataset_test.load_image(image_id)
+        test_id = dataset_test.image_info[image_id]['path'].split('/')[-1][:-4]
+
+        results = model_inf.detect([test_image], verbose=0)
+        r = results[0]
+
+        rmaskcollapse = np.zeros((r['masks'].shape[0], r['masks'].shape[1]))
+        for i in range(r['masks'].shape[2]):
+            rmaskcollapse = rmaskcollapse + r['masks'][:, :, i] * (i + 1)
+
+        skimage.io.imsave(TEST_MASK_SAVE_PATH + '/' + model_name + upscale_method+'/' + test_id + '_mask.png',
+                          np.concatenate((dataset_test.load_image(image_id) / 255.,
+                                          label2rgb(rmaskcollapse, bg_label=0)), axis=1))
+        np.save(TEST_MASK_SAVE_PATH + '/' + model_name + upscale_method+'/' + test_id + '_mask.npy',rmaskcollapse)
+        for i in range(r['masks'].shape[2]):
+            rle = list(utils.prob_to_rles(r['masks'][:, :, i]))
+            rles.extend(rle)
+            new_test_ids.append(test_id)
+
 # Create submission DataFrame
 sub = pd.DataFrame()
 sub['ImageId'] = new_test_ids
 sub['EncodedPixels'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
-sub.to_csv('submission/sub-test-'+model_name+'.csv', index=False)
+sub.to_csv('submission/sub-test-'+model_name+upscale_method+'.csv', index=False)

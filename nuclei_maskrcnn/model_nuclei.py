@@ -28,8 +28,7 @@ import keras.layers as KL
 import keras.initializers as KI
 import keras.engine as KE
 import keras.models as KM
-
-import utils
+import utils_nuclei as utils
 
 # Requires TensorFlow 1.3+ and Keras 2.0.8+.
 from distutils.version import LooseVersion
@@ -267,11 +266,11 @@ class ProposalLayer(KE.Layer):
                                    self.config.IMAGES_PER_GPU)
         deltas = utils.batch_slice([deltas, ix], lambda x, y: tf.gather(x, y),
                                    self.config.IMAGES_PER_GPU)
-        print anchors.shape
+        # print anchors.shape
         anchors = utils.batch_slice(ix, lambda x: tf.gather(anchors, x),
                                     self.config.IMAGES_PER_GPU,
                                     names=["pre_nms_anchors"])
-        print anchors
+        # print anchors
 
         # Apply deltas to anchors to get refined anchors.
         # [batch, N, (y1, x1, y2, x2)]
@@ -1164,6 +1163,12 @@ def load_image_gt(dataset, config, image_id, augment=False,
     # Load image and mask
     image = dataset.load_image(image_id)
     mask, class_ids = dataset.load_mask(image_id)
+
+    if augment:
+        image, mask, class_ids = utils.augment_image_mask_and_rmb(image, mask,
+                                                                  config.RAND_SCALE_TRAIN,
+                                                                  config.RM_BOUND)
+
     shape = image.shape
     image, window, scale, padding = utils.resize_image(
         image,
@@ -1173,10 +1178,9 @@ def load_image_gt(dataset, config, image_id, augment=False,
     mask = utils.resize_mask(mask, scale, padding)
 
     # Random horizontal flips.
-    if augment:
-        if random.randint(0, 1):
-            image = np.fliplr(image)
-            mask = np.fliplr(mask)
+    # if random.randint(0, 1):
+    #     image = np.fliplr(image)
+    #     mask = np.fliplr(mask)
 
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.
@@ -1223,6 +1227,12 @@ def load_image_gt_noresize(dataset, config, image_id, augment=False,
     # Load image and mask
     image = dataset.load_image(image_id)
     mask, class_ids = dataset.load_mask(image_id)
+
+    if augment:
+        image, mask, class_ids = utils.augment_image_mask_and_rmb(image, mask,
+                                                                  config.RAND_SCALE_TRAIN,
+                                                                  config.RM_BOUND)
+
     shape = image.shape
     image, window, scale, padding = utils.resize_image(
         image,
@@ -1232,10 +1242,9 @@ def load_image_gt_noresize(dataset, config, image_id, augment=False,
     mask = utils.resize_mask(mask, scale, padding)
 
     # Random horizontal flips.
-    if augment:
-        if random.randint(0, 1):
-            image = np.fliplr(image)
-            mask = np.fliplr(mask)
+    # if random.randint(0, 1):
+    #     image = np.fliplr(image)
+    #     mask = np.fliplr(mask)
 
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.
@@ -1806,22 +1815,16 @@ class MaskRCNN():
 
         # Image size must be dividable by 2 multiple times
         h, w = config.IMAGE_SHAPE[:2]
-        tmt = 5 # two_multiple_times
-        if h / 2**tmt != int(h / 2**tmt) or w / 2**tmt != int(w / 2**tmt):
-            raise Exception("Image size must be dividable by 2 at least 5 times "
+        if h / 2**6 != int(h / 2**6) or w / 2**6 != int(w / 2**6):
+            raise Exception("Image size must be dividable by 2 at least 6 times "
                             "to avoid fractions when downscaling and upscaling."
                             "For example, use 256, 320, 384, 448, 512, ... etc. ")
 
         # Inputs
-        # input_image = KL.Input(
-        #     shape=config.IMAGE_SHAPE.tolist(), name="input_image")
-        # input_image_meta = KL.Input(shape=[None], name="input_image_meta")
+        input_image = KL.Input(
+            shape=config.IMAGE_SHAPE.tolist(), name="input_image")
+        input_image_meta = KL.Input(shape=[None], name="input_image_meta")
         if mode == "training":
-            # Inputs
-            input_image = KL.Input(
-                shape=config.IMAGE_SHAPE.tolist(), name="input_image")
-            input_image_meta = KL.Input(shape=[None], name="input_image_meta")
-
             # RPN GT
             input_rpn_match = KL.Input(
                 shape=[None, 1], name="input_rpn_match", dtype=tf.int32)
@@ -1852,17 +1855,11 @@ class MaskRCNN():
                     shape=[config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1], None],
                     name="input_gt_masks", dtype=bool)
 
-        elif mode == "inference":
-            # Inputs
-            input_image = KL.Input(shape=config.IMAGE_SHAPE.tolist(), name="input_image_inf")
-            # input_image = KL.Input(shape=(None,None,3), name="input_image_inf")
-            input_image_meta = KL.Input(shape=[None], name="input_image_meta_inf")
-
         # Build the shared convolutional layers.
         # Bottom-up Layers
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
-        _, C2, C3, C4, C5 = resnet_graph(input_image, "resnet50", stage5=True)
+        _, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE_NAME, stage5=True)
         # Top-down Layers
         # TODO: add assert to varify feature map sizes match what's in config
         P5 = KL.Conv2D(256, (1, 1), name='fpn_c5p5')(C5)
@@ -1882,10 +1879,10 @@ class MaskRCNN():
         P5 = KL.Conv2D(256, (3, 3), padding="SAME", name="fpn_p5")(P5)
         # P6 is used for the 5th anchor scale in RPN. Generated by
         # subsampling from P5 with stride of 2.
-        # P6 = KL.MaxPooling2D(pool_size=(1, 1), strides=2, name="fpn_p6")(P5)
+        P6 = KL.MaxPooling2D(pool_size=(1, 1), strides=2, name="fpn_p6")(P5)
 
         # Note that P6 is used in RPN, but not in the classifier heads.
-        rpn_feature_maps = [P2, P3, P4, P5]# , P6]
+        rpn_feature_maps = [P2, P3, P4, P5, P6]
         mrcnn_feature_maps = [P2, P3, P4, P5]
 
         # Generate Anchors
@@ -2045,32 +2042,6 @@ class MaskRCNN():
         checkpoint = os.path.join(dir_name, checkpoints[-1])
         return dir_name, checkpoint
 
-    def find_2nd2_last(self):
-        """Finds the last checkpoint file of the last trained model in the
-        model directory.
-        Returns:
-            log_dir: The directory where events and weights are saved
-            checkpoint_path: the path to the last checkpoint file
-        """
-        # Get directory names. Each directory corresponds to a model
-        dir_names = next(os.walk(self.model_dir))[1]
-        key = self.config.NAME.lower()
-        dir_names = filter(lambda f: f.startswith(key), dir_names)
-        dir_names = sorted(dir_names)
-        if not dir_names:
-            return None, None
-        # Pick last directory
-        dir_name = os.path.join(self.model_dir, dir_names[-1])
-        # Find the last checkpoint
-        checkpoints = next(os.walk(dir_name))[2]
-        checkpoints = filter(lambda f: f.startswith("mask_rcnn"), checkpoints)
-        checkpoints = sorted(checkpoints)
-        if not checkpoints:
-            return dir_name, None
-        assert len(checkpoints)>1, "less than two model files"
-        checkpoint = os.path.join(dir_name, checkpoints[-2])
-        return dir_name, checkpoint
-
     def load_weights(self, filepath, by_name=False, exclude=None):
         """Modified version of the correspoding Keras function with
         the addition of multi-GPU support and the ability to exclude
@@ -2123,13 +2094,16 @@ class MaskRCNN():
                                 md5_hash='a268eb855778b3df3c7506639542a6af')
         return weights_path
 
-    def compile(self, learning_rate, momentum):
+    def compile(self, optimizer_name, learning_rate, momentum):
         """Gets the model ready for training. Adds losses, regularization, and
         metrics. Then calls the Keras compile() function.
         """
         # Optimizer object
-        optimizer = keras.optimizers.SGD(lr=learning_rate, momentum=momentum,
-                                         clipnorm=5.0)
+
+        if optimizer_name == 'sgd':
+            optimizer = keras.optimizers.SGD(lr=learning_rate, momentum=momentum, clipnorm=5.0)
+        else:
+            optimizer = keras.optimizers.adam(lr=learning_rate, clipnorm=5.0)
         # Add Losses
         # First, clear previously set losses to avoid duplication
         self.keras_model._losses = []
@@ -2269,7 +2243,8 @@ class MaskRCNN():
 
         # Data generators
         train_generator = data_generator(train_dataset, self.config, shuffle=True,
-                                         batch_size=self.config.BATCH_SIZE)
+                                         batch_size=self.config.BATCH_SIZE,
+                                         augment=self.config.AUGMENTATION)
         val_generator = data_generator(val_dataset, self.config, shuffle=True,
                                        batch_size=self.config.BATCH_SIZE,
                                        augment=False)
@@ -2286,7 +2261,7 @@ class MaskRCNN():
         log("\nStarting at epoch {}. LR={}\n".format(self.epoch, learning_rate))
         log("Checkpoint Path: {}".format(self.checkpoint_path))
         self.set_trainable(layers)
-        self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
+        self.compile(self.config.OPTIMIZER, learning_rate, self.config.LEARNING_MOMENTUM)
 
         # Work-around for Windows: Keras fails on Windows when using
         # multiprocessing workers. See discussion here:
@@ -2306,7 +2281,7 @@ class MaskRCNN():
             validation_steps=self.config.VALIDATION_STEPS,
             max_queue_size=100,
             workers=workers,
-            use_multiprocessing=False,
+            use_multiprocessing=True,
             verbose=1,
         )
         self.epoch = max(self.epoch, epochs)
@@ -2437,7 +2412,7 @@ class MaskRCNN():
         # Run object detection
         detections, mrcnn_class, mrcnn_bbox, mrcnn_mask, \
             rois, rpn_class, rpn_bbox =\
-            self.keras_model.predict([molded_images, image_metas], verbose=1)
+            self.keras_model.predict([molded_images, image_metas], verbose=0)
         # Process detections
         results = []
         for i, image in enumerate(images):
