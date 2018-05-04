@@ -6,7 +6,7 @@ import numpy as np
 import glob
 import pandas as pd
 
-color_id = glob.glob('~/dsb18/output/*.npy')
+color_id = glob.glob('~/output/*.npy')
 for ids in color_id:
     print ids
 	

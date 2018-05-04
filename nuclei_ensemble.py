@@ -10,13 +10,13 @@ from skimage.color import label2rgb
 import pandas as pd
 from nuclei_utils import deoverlap_masks, prob_to_rles, to_graph, compute_overlaps_masks, sweep_iou_mask_ap
 
-TEST_IMAGE_PATH = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_test_image/'
-TRAIN_IMAGE_PATH = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_train_image/'
-SUBMISSION_PATH = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/submission/'
-TEST_MASK_SAVE_PATH = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_masks_test/'
-VAL_MASK_SAVE_PATH = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_masks_val/'
-TEST_MASK_ENSEMBLE_SAVE_PATH = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_masks_test_ensemble/'
-VAL_MASK_ENSEMBLE_SAVE_PATH = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_masks_val_ensemble/'
+TEST_IMAGE_PATH = '~/nuclei_maskrcnn/data/stage1_test_image/'
+TRAIN_IMAGE_PATH = '~/nuclei_maskrcnn/data/stage1_train_image/'
+SUBMISSION_PATH = '~/nuclei_maskrcnn/submission/'
+TEST_MASK_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_test/'
+VAL_MASK_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_val/'
+TEST_MASK_ENSEMBLE_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_test_ensemble/'
+VAL_MASK_ENSEMBLE_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_val_ensemble/'
 
 def ensemble_func(ensemble_dirs = None, iou_threshold = 0.5, model_name = '', test_flag=True):
     if test_flag:
@@ -158,22 +158,11 @@ if test_flag:
 else:
     ensemble_input_dir = VAL_MASK_SAVE_PATH
 
-model_name = 'nuclei_train20180407T1400_0039'
+model_name = 'nuclei_train20180000T0000_0000'
 ensemble_dirs = [ensemble_input_dir + '/' + model_name + '/',
                  ensemble_input_dir + '/' + model_name + '_vflip/',
                  ensemble_input_dir + '/' + model_name + '_hflip/']
 
-model_name = 'nuclei_train20180405T0005_0031'
-ensemble_dirs.extend([ensemble_input_dir + '/' + model_name + '/',
-                 ensemble_input_dir + '/' + model_name + '_vflip/',
-                 ensemble_input_dir + '/' + model_name + '_hflip/'])
-
-model_name = 'nuclei_train20180330T2330_0020'
-ensemble_dirs.extend([ensemble_input_dir + '/' + model_name + '/',
-                 ensemble_input_dir + '/' + model_name + '_vflip/',
-                 ensemble_input_dir + '/' + model_name + '_hflip/'])
-
-# model_name = model_name + '_ori_vflip_hflip'
-model_name = 'nine_models_ori_vflip_hflip'
+model_name = 'ensemble'
 print ensemble_dirs
 ensemble_func(ensemble_dirs=ensemble_dirs, model_name=model_name, test_flag=test_flag)

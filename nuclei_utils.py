@@ -17,12 +17,11 @@ import skimage.color
 from skimage.color import gray2rgb, label2rgb
 import skimage.io
 import skimage.morphology
-# from urllib.request import urlopen
 from urllib import urlopen
 import shutil
 import networkx
 
-# URL from which to download the latest COCO trained weights
+# URL from which to download the COCO pretrained weights by MatterPort
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
 
 # Run-length encoding from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python
@@ -163,7 +162,6 @@ def non_max_suppression(boxes, scores, threshold):
         ixs = np.delete(ixs, 0)
     return np.array(pick, dtype=np.int32)
 
-
 def apply_box_deltas(boxes, deltas):
     """Applies the given deltas to the given boxes.
     boxes: [N, (y1, x1, y2, x2)]. Note that (y2, x2) is outside the box.
@@ -186,7 +184,6 @@ def apply_box_deltas(boxes, deltas):
     y2 = y1 + height
     x2 = x1 + width
     return np.stack([y1, x1, y2, x2], axis=1)
-
 
 def box_refinement_graph(box, gt_box):
     """Compute refinement needed to transform box to gt_box.
@@ -213,7 +210,6 @@ def box_refinement_graph(box, gt_box):
     result = tf.stack([dy, dx, dh, dw], axis=1)
     return result
 
-
 def box_refinement(box, gt_box):
     """Compute refinement needed to transform box to gt_box.
     box and gt_box are [N, (y1, x1, y2, x2)]. (y2, x2) is
@@ -238,7 +234,6 @@ def box_refinement(box, gt_box):
     dw = np.log(gt_width / width)
 
     return np.stack([dy, dx, dh, dw], axis=1)
-
 
 ############################################################
 #  Dataset
@@ -1135,8 +1130,6 @@ def augment_image_mask_and_rmb(image, mask, rand_scale_train=True, scale_high_in
         masks[:,:,k] = mask_tmp.copy()
         k += 1
 
-    # print('finish augment')
-    # print(masks.shape)
     class_ids = np.ones(len(num_inst), np.int32)
     if len(num_inst) > 1:
         mean_size = np.mean(masks_size[:,0])
@@ -1156,8 +1149,6 @@ def augment_image_mask_and_rmb(image, mask, rand_scale_train=True, scale_high_in
         if class_ids[i] > 0:
             rmaskcollapse_rmb = rmaskcollapse_rmb + masks[:, :, i] * (i + 1)
     rmaskcollapse_rmb = label2rgb(rmaskcollapse_rmb, bg_label=0)
-
-    skimage.io.imsave('tmp_mask_rmb.png', np.concatenate((rmaskcollapse, image / 255., rmaskcollapse_rmb), axis=1))
 
     return image, masks, class_ids
 

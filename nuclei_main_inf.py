@@ -20,7 +20,7 @@ import nuclei_utils as utils
 import nuclei_model as modellib
 
 GPU_option = 0
-log_name = "logs_par" if GPU_option else "logs"
+log_name = "logs"
 
 # Directory of the project and models
 ROOT_DIR = os.getcwd()
@@ -32,7 +32,7 @@ if not os.path.exists(COCO_MODEL_PATH):
 # Directory of nuclei data
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
-TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed_0329")
+TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed")
 TRAIN_DATA_MOSAIC_PATH = os.path.join(ROOT_DIR,"mosaic","stage1_train_mosaic")
 TEST_DATA_MOSAIC_PATH = os.path.join(ROOT_DIR,"mosaic","stage1_test_mosaic")
 TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
@@ -53,11 +53,7 @@ val_group_flag = True
 test_flag = True
 test_group_flag = True
 
-model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180407T1400/mask_rcnn_nuclei_train_0039.h5'
-model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180405T0005/mask_rcnn_nuclei_train_0031.h5'
-model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180330T2330/mask_rcnn_nuclei_train_0020.h5'
-model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180409T1026/mask_rcnn_nuclei_train_0025.h5'
-model_path = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/logs/nuclei_train20180409T1026/mask_rcnn_nuclei_train_0034.h5'
+model_path = '~/nuclei_maskrcnn/logs/nuclei_train20180000T0000/mask_rcnn_nuclei_train_0000.h5'
 ###########################################
 # Train vs. validation split
 ###########################################
@@ -66,7 +62,7 @@ train_ids = []
 val_ids = []
 rep_id = [2,2,8,6,4,4,8]
 
-df = pd.read_csv('image_group_train_pickle.csv')
+df = pd.read_csv('image_group_train.csv')
 ids = df['id']
 groups = df['group']
 istrain = df['istrain']

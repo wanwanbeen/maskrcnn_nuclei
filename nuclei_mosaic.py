@@ -20,11 +20,11 @@ import networkx
 from networkx.algorithms.components.connected import connected_components
 
 # DIRECTORIES
-TRAIN_DIR = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_train'
-TEST_DIR = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/data/stage1_test'
+TRAIN_DIR = '~/nuclei_maskrcnn/data/stage1_train'
+TEST_DIR = '~/nuclei_maskrcnn/data/stage1_test'
 IMG_DIR_NAME = 'images'  # Folder name including the image
 MASK_DIR_NAME = 'masks'  # Folder name including the masks
-MOSAIC_DIR = '/home/jieyang/code/TOOK18/nuclei_maskrcnn/mosaic_test/'
+MOSAIC_DIR = '~/nuclei_maskrcnn/mosaic_test/'
 MOSAIC_TRAIN_DIR = os.path.join(MOSAIC_DIR, 'stage1_train')
 MOSAIC_TEST_DIR = os.path.join(MOSAIC_DIR, 'stage1_test')
 
@@ -44,7 +44,6 @@ def read_image(filepath, color_mode=cv2.IMREAD_COLOR, target_size=None, space='b
     if space == 'hsv':
         img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     return img
-
 
 def read_train_data_properties(train_dir, img_dir_name, mask_dir_name):
     """Read basic properties of training images and masks"""
@@ -67,7 +66,6 @@ def read_train_data_properties(train_dir, img_dir_name, mask_dir_name):
                                           'num_masks', 'image_path', 'mask_dir'])
     return train_df
 
-
 def read_test_data_properties(test_dir, img_dir_name):
     """Read basic properties of test images."""
     tmp = []
@@ -83,7 +81,6 @@ def read_test_data_properties(test_dir, img_dir_name):
     test_df = pd.DataFrame(tmp, columns=['img_id', 'img_height', 'img_width',
                                          'img_ratio', 'num_channels', 'image_path'])
     return test_df
-
 
 def load_raw_data(image_size=(256, 256), space='bgr', load_mask=True):
     """Load raw data."""
@@ -122,7 +119,6 @@ def load_raw_data(image_size=(256, 256), space='bgr', load_mask=True):
     else:
         return x_train, x_test
 
-
 def get_domimant_colors(img, top_colors=1):
     """Return dominant image color"""
     img_l = img.reshape((img.shape[0] * img.shape[1], img.shape[2]))
@@ -136,7 +132,6 @@ def get_domimant_colors(img, top_colors=1):
     hist = hist.astype("float")
     hist /= hist.sum()
     return clt.cluster_centers_, hist
-
 
 def cluster_images_by_hsv():
     """Clusterization based on hsv colors. Adds 'hsv_cluster' column to tables"""
@@ -155,7 +150,6 @@ def cluster_images_by_hsv():
     print('Images clustered')
     return None
 
-
 def plot_images(selected_images_df, images_rows=4, images_cols=8, plot_figsize=4):
     """Plot image_rows*image_cols of selected images. Used to visualy check clusterization"""
     f, axarr = plt.subplots(images_rows, images_cols, figsize=(plot_figsize * images_cols, images_rows * plot_figsize))
@@ -172,7 +166,6 @@ def plot_images(selected_images_df, images_rows=4, images_cols=8, plot_figsize=4
             ax.axis('off')
             ax.set_title("%dx%d" % (width, height))
             ax.imshow(img)
-
 
 ###########################################
 # mosaic
