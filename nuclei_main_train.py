@@ -1,9 +1,12 @@
+__authors__="Jie Yang and Xinyang Feng"
+
 ###########################################
 # Library and Path
 ###########################################
 
 import os
 import random
+import argparse
 import pickle
 import numpy as np
 import skimage.io
@@ -17,90 +20,17 @@ from nuclei_config import Config
 import nuclei_utils as utils
 import nuclei_model as modellib
 
-GPU_option = 0
-log_name = "logs"
-
-# Directory of the project and models
-ROOT_DIR = os.getcwd()
-MODEL_DIR = os.path.join(ROOT_DIR, log_name)
-COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
-if not os.path.exists(COCO_MODEL_PATH):
-    utils.download_trained_weights(COCO_MODEL_PATH)
-
-# Directory of nuclei data
-DATA_DIR = os.path.join(ROOT_DIR, "data")
-TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
-TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed")
-TRAIN_DATA_MOSAIC_PATH = os.path.join(ROOT_DIR,"mosaic","stage1_train_mosaic")
-TEST_DATA_MOSAIC_PATH = os.path.join(ROOT_DIR,"mosaic","stage1_test_mosaic")
-TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
-TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
-TEST_VAL_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_val")
-
-os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU_option)
-
-import tensorflow as tf
-config_tf = tf.ConfigProto()
-config_tf.gpu_options.allow_growth = True
-session = tf.Session(config=config_tf)
-
-train_flag = True
-train_head = True
-train_all  = True
-
-epoch_number_head = 12
-epoch_number_all_fast = 6
-epoch_number_all_slow = 8
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 ###########################################
-# Train vs. validation split
+# Training Configuration
 ###########################################
-
-train_ids = []
-val_ids = []
-rep_id = [2,2,8,6,4,4,8]
-
-df = pd.read_csv('image_group_train.csv')
-ids = df['id']
-groups = df['group']
-istrain = df['istrain']
-mosaic_ids = df['mosaic_id']
-train_ids_mosaic = np.unique(mosaic_ids[istrain==1])[1:]
-
-for k in range(len(ids)):
-    if istrain[k]:
-        for iter_tmp in range(rep_id[groups[k]-1]):
-            train_ids.append(ids[k])
-    else:
-        val_ids.append(ids[k])
-
-for k in range(len(train_ids)):
-    train_ids[k] = os.path.join(TRAIN_DATA_PATH,train_ids[k],'images',train_ids[k]+'.png')
-train_ids_ext = glob.glob(TRAIN_DATA_EXT_PATH+'/*/images/*.png')
-train_ids.extend(train_ids_ext)
-
-for k,id_m in enumerate(train_ids_mosaic):
-    train_ids_mosaic[k] = os.path.join(TRAIN_DATA_MOSAIC_PATH,id_m,'images',id_m+'_image.png')
-train_ids.extend(train_ids_mosaic)
-
-test_ids = next(os.walk(TEST_DATA_PATH))[1]
-test_ids_m = next(os.walk(TEST_DATA_MOSAIC_PATH))[1]
-
-print('train = '+str(len(train_ids))+' external = '+str(len(train_ids_ext)))
-
-###########################################
-# Training Config
-###########################################
-
 class TrainingConfig(Config):
-
     NAME = "nuclei_train"
     IMAGES_PER_GPU = 4
-    GPU_COUNT = 1
 
     NUM_CLASSES = 1 + 1
     VALIDATION_STEPS = 50
-    STEPS_PER_EPOCH = len(train_ids)/IMAGES_PER_GPU
 
     RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)
     RPN_TRAIN_ANCHORS_PER_IMAGE = 384
@@ -124,18 +54,11 @@ class TrainingConfig(Config):
     OPTIMIZER = 'adam'
     ADD_NOISE = False
 
-config_head = TrainingConfig(512,256)
-config_head.display()
-
 class TrainingAllConfig(TrainingConfig):
-    GPU_COUNT = 1
-    IMAGES_PER_GPU = 2
-    STEPS_PER_EPOCH = len(train_ids)/IMAGES_PER_GPU
-    
-config_all = TrainingAllConfig(512,256)
+    IMAGES_PER_GPU = 1
 
 ###########################################
-# Load Nuclei Dataset
+# Define nuclei dataset
 ###########################################
 
 class NucleiDataset(utils.Dataset):
@@ -161,44 +84,103 @@ class NucleiDataset(utils.Dataset):
             mask[:, :, k] = skimage.io.imread(os.path.join(mask_dir, mask_files[k]))
         return mask, class_ids
 
-###########################################
-# Prepare data
-###########################################
+def main_train(params):
 
-random.seed(1234)
-random.shuffle(train_ids)
-random.shuffle(val_ids)
+    ROOT_DIR = params['dir_root']
+    log_name = params['dir_log']
 
-dataset_train = NucleiDataset()
-dataset_train.add_class("cell", 1, "nulcei")
-dataset_train.add_class("cell", -1, "boundary")
-for k, train_id in enumerate(train_ids):
-    dataset_train.add_image("cell", k, train_id)
-dataset_train.prepare()
+    train_head = params['train_head']
+    train_all = params['train_all']
 
-dataset_val = NucleiDataset()
-dataset_val.add_class("cell", 1, "nulcei")
-for k, val_id in enumerate(val_ids):
-    dataset_val.add_image("cell", k, os.path.join(TRAIN_DATA_PATH, val_id, 'images', val_id + '.png'))
-dataset_val.prepare()
+    epoch_number_head = params['epoch_number_head']
+    epoch_number_all_fast = params['epoch_number_all_fast']
+    epoch_number_all_slow = params['epoch_number_all_slow']
 
-dataset_test = NucleiDataset()
-dataset_test.add_class("cell", 1, "nulcei")
-for k, test_id in enumerate(test_ids):
-    dataset_test.add_image("cell", k, os.path.join(TEST_DATA_PATH, test_id, 'images', test_id + '.png'))
-dataset_test.prepare()
+    # Directory of the project and models
+    MODEL_DIR = os.path.join(ROOT_DIR, log_name)
+    COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
+    if not os.path.exists(COCO_MODEL_PATH):
+        utils.download_trained_weights(COCO_MODEL_PATH)
 
-dataset_test_m = NucleiDataset()
-dataset_test_m.add_class("cell", 1, "nulcei")
-for k, test_id_m in enumerate(test_ids_m):
-    dataset_test_m.add_image("cell", k, os.path.join(TEST_DATA_MOSAIC_PATH, test_id_m, 'images', test_id_m + '_image.png'))
-dataset_test_m.prepare()
+    # Directory of nuclei data
+    DATA_DIR = os.path.join(ROOT_DIR, "data")
+    TRAIN_DATA_PATH = os.path.join(DATA_DIR,"train")
+    TEST_DATA_PATH = os.path.join(DATA_DIR, "test")
+    TRAIN_DATA_MOSAIC_PATH = os.path.join(DATA_DIR,"mosaic_train")
+    TEST_DATA_MOSAIC_PATH = os.path.join(DATA_DIR,"mosaic_test")
+    TEST_VAL_MASK_SAVE_PATH = os.path.join(DATA_DIR, "masks_val")
+    TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"masks_test")
 
-###########################################
-# Begin Training
-###########################################
+    import tensorflow as tf
+    config_tf = tf.ConfigProto()
+    config_tf.gpu_options.allow_growth = True
+    session = tf.Session(config=config_tf)
 
-if train_flag:
+    ###########################################
+    # Train vs. validation split
+    ###########################################
+
+    train_ids = []
+    val_ids = []
+    rep_id = [1,3,3] # number of augmentations for each class
+
+    df = pd.read_csv('image_group_train.csv')
+    ids = df['id']
+    groups = df['group']
+    istrain = df['istrain']
+    mosaic_ids = df['mosaic_id']
+    train_ids_mosaic = np.unique(mosaic_ids[istrain==1])[1:]
+
+    for k in range(len(ids)):
+        if istrain[k]:
+            for iter_tmp in range(rep_id[groups[k]-1]):
+                train_ids.append(ids[k])
+        else:
+            val_ids.append(ids[k])
+
+    for k in range(len(train_ids)):
+        train_ids[k] = os.path.join(TRAIN_DATA_PATH,train_ids[k],'images',train_ids[k]+'.png')
+
+    for k,id_m in enumerate(train_ids_mosaic):
+        train_ids_mosaic[k] = os.path.join(TRAIN_DATA_MOSAIC_PATH,id_m,'images',id_m+'_image.png')
+    train_ids.extend(train_ids_mosaic)
+
+    print('train = '+str(len(train_ids)))
+
+    ###########################################
+    # Training Config
+    ###########################################
+
+    config_head = TrainingConfig(512,256, len(train_ids))
+    config_head.display()
+
+    config_all = TrainingAllConfig(512,256, len(train_ids))
+    config_all.display()
+
+    ###########################################
+    # Prepare data
+    ###########################################
+
+    random.seed(1234)
+    random.shuffle(train_ids)
+    random.shuffle(val_ids)
+
+    dataset_train = NucleiDataset()
+    dataset_train.add_class("cell", 1, "nulcei")
+    dataset_train.add_class("cell", -1, "boundary")
+    for k, train_id in enumerate(train_ids):
+        dataset_train.add_image("cell", k, train_id)
+    dataset_train.prepare()
+
+    dataset_val = NucleiDataset()
+    dataset_val.add_class("cell", 1, "nulcei")
+    for k, val_id in enumerate(val_ids):
+        dataset_val.add_image("cell", k, os.path.join(TRAIN_DATA_PATH, val_id, 'images', val_id + '.png'))
+    dataset_val.prepare()
+
+    ###########################################
+    # Begin Training
+    ###########################################
 
     # Train the head branches
     if train_head:
@@ -224,3 +206,25 @@ if train_flag:
         model.train(dataset_train, dataset_val, learning_rate=config_all.LEARNING_RATE, epochs=epoch_init_fast,layers="all")
         model.train(dataset_train, dataset_val, learning_rate=config_all.LEARNING_RATE/10., epochs=epoch_init_slow, layers="all")
         del model
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--dir_root', default='', help='root directory of the project')
+    parser.add_argument('--dir_log', default='logs', help='log directory')
+
+    parser.add_argument('--train_head', default=True, help='if true, train mask r-cnn head layers')
+    parser.add_argument('--train_all', default=True, help='if true, train mask r-cnn all layers')
+
+    parser.add_argument('--epoch_number_head', default=12, type=int, help='number of epochs to train head layers')
+    parser.add_argument('--epoch_number_all_fast', default=6, type=int, help='first train all layers with a fast learning rate')
+    parser.add_argument('--epoch_number_all_slow', default=8, type=int, help='then train all layers with a fast learning rate')
+
+    epoch_number_head = 12
+    epoch_number_all_fast = 6
+    epoch_number_all_slow = 8
+
+    args = parser.parse_args()
+    params = vars(args) # convert to ordinary dict
+    main_train(params)

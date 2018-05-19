@@ -1,3 +1,5 @@
+__authors__="Jie Yang and Xinyang Feng"
+
 ###########################################
 # utility functions
 ###########################################
@@ -1058,7 +1060,6 @@ def random_shift_scale_rotate_transform2(image, mask,
         box1 = box1.astype(np.float32)
         mat = cv2.getPerspectiveTransform(box0,box1)
 
-        skimage.io.imsave('tmp_image_stop.png', image)
         image = cv2.warpPerspective(image, mat, (width,height),flags=cv2.INTER_LINEAR,
                                     borderMode=borderMode, borderValue=(0,0,0,))  #cv2.BORDER_CONSTANT, borderValue = (0, 0, 0))  #cv2.BORDER_REFLECT_101
 
@@ -1139,16 +1140,7 @@ def augment_image_mask_and_rmb(image, mask, rand_scale_train=True, scale_high_in
                 if masks_size[k,0] < 0.05 or (masks_size[k,0] < 0.3 and masks_size[k,0] > 0):
                     class_ids[k] = -1
 
-    rmaskcollapse = np.zeros((image.shape[0], image.shape[1]))
-    for i in range(masks.shape[2]):
-        rmaskcollapse = rmaskcollapse + masks[:, :, i] * (i + 1)
-    rmaskcollapse = label2rgb(rmaskcollapse, bg_label=0)
-
-    rmaskcollapse_rmb = np.zeros((image.shape[0], image.shape[1]))
-    for i in range(masks.shape[2]):
-        if class_ids[i] > 0:
-            rmaskcollapse_rmb = rmaskcollapse_rmb + masks[:, :, i] * (i + 1)
-    rmaskcollapse_rmb = label2rgb(rmaskcollapse_rmb, bg_label=0)
+    skimage.io.imsave('image_augment_refresh.png', image)
 
     return image, masks, class_ids
 

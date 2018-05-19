@@ -1,3 +1,5 @@
+__authors__="Jie Yang and Xinyang Feng"
+
 ###########################################
 # configuration class
 ###########################################
@@ -150,10 +152,11 @@ class Config(object):
     OPTIMIZER = 'sgd' # otherwise adam
     SAVE_PROB_MASK = True
 
-    def __init__(self, image_max_dim,image_min_dim):
+    def __init__(self, image_max_dim,image_min_dim,id_length):
         """Set values of computed attributes."""
         # Effective batch size
         self.BATCH_SIZE = self.IMAGES_PER_GPU * self.GPU_COUNT
+        self.STEPS_PER_EPOCH = id_length/self.IMAGES_PER_GPU
         self.IMAGE_MAX_DIM = image_max_dim
         self.IMAGE_MIN_DIM = image_min_dim
 

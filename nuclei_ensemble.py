@@ -1,3 +1,5 @@
+__authors__="Jie Yang and Xinyang Feng"
+
 ###########################################
 # ensemble
 ###########################################
@@ -10,13 +12,12 @@ from skimage.color import label2rgb
 import pandas as pd
 from nuclei_utils import deoverlap_masks, prob_to_rles, to_graph, compute_overlaps_masks, sweep_iou_mask_ap
 
-TEST_IMAGE_PATH = '~/nuclei_maskrcnn/data/stage1_test_image/'
+TEST_IMAGE_PATH = '~/data/stage1_test_image/'
 TRAIN_IMAGE_PATH = '~/nuclei_maskrcnn/data/stage1_train_image/'
-SUBMISSION_PATH = '~/nuclei_maskrcnn/submission/'
 TEST_MASK_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_test/'
 VAL_MASK_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_val/'
-TEST_MASK_ENSEMBLE_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_test_ensemble/'
 VAL_MASK_ENSEMBLE_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_val_ensemble/'
+TEST_MASK_ENSEMBLE_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_test_ensemble/'
 
 def ensemble_func(ensemble_dirs = None, iou_threshold = 0.5, model_name = '', test_flag=True):
     if test_flag:
@@ -143,9 +144,9 @@ def ensemble_func(ensemble_dirs = None, iou_threshold = 0.5, model_name = '', te
     if test_flag:
         # Create submission DataFrame
         sub = pd.DataFrame()
-        sub['ImageId'] = new_test_ids
-        sub['EncodedPixels'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
-        sub.to_csv(os.path.join(SUBMISSION_PATH,'sub-test-'+model_name+'_ensemble.csv'), index=False)
+        sub['ID'] = new_test_ids
+        sub['RLE'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
+        sub.to_csv('RLE-test-'+model_name+'_ensemble.csv', index=False)
 	
 ###########################################
 # main

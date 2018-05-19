@@ -1,3 +1,5 @@
+__authors__="Jie Yang and Xinyang Feng"
+
 ###########################################
 # mask2rle after postprocessing
 ###########################################
@@ -48,6 +50,6 @@ for ids in color_id:
         test_id.append(idno)
 	
 sub=pd.DataFrame()
-sub['ImageId']=test_id
-sub['EncodedPixels']=pd.Series(rles).apply(lambda x:' '.join(str(y) for y in x))
-sub.to_csv('sub-test-postprocess.csv',index=False)
+sub['ID']=test_id
+sub['RLE']=pd.Series(rles).apply(lambda x:' '.join(str(y) for y in x))
+sub.to_csv('RLE-test-final.csv',index=False)

@@ -1,9 +1,12 @@
+__authors__="Jie Yang and Xinyang Feng"
+
 ###########################################
 # Library and Path
 ###########################################
 
 import os
 import random
+import argparse
 import pickle
 import numpy as np
 import skimage.io
@@ -19,94 +22,17 @@ from nuclei_config import Config
 import nuclei_utils as utils
 import nuclei_model as modellib
 
-GPU_option = 0
-log_name = "logs"
-
-# Directory of the project and models
-ROOT_DIR = os.getcwd()
-MODEL_DIR = os.path.join(ROOT_DIR, log_name)
-COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
-if not os.path.exists(COCO_MODEL_PATH):
-    utils.download_trained_weights(COCO_MODEL_PATH)
-
-# Directory of nuclei data
-DATA_DIR = os.path.join(ROOT_DIR, "data")
-TRAIN_DATA_PATH = os.path.join(DATA_DIR,"stage1_train")
-TRAIN_DATA_EXT_PATH = os.path.join(DATA_DIR,"external_processed")
-TRAIN_DATA_MOSAIC_PATH = os.path.join(ROOT_DIR,"mosaic","stage1_train_mosaic")
-TEST_DATA_MOSAIC_PATH = os.path.join(ROOT_DIR,"mosaic","stage1_test_mosaic")
-TEST_DATA_PATH = os.path.join(DATA_DIR,"stage1_test")
-TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_test")
-TEST_VAL_MASK_SAVE_PATH = os.path.join(DATA_DIR,"stage1_masks_val")
-
-os.environ["CUDA_VISIBLE_DEVICES"] = str(GPU_option)
-
-import tensorflow as tf
-config_tf = tf.ConfigProto()
-config_tf.gpu_options.allow_growth = True
-session = tf.Session(config=config_tf)
-
-label_all = False
-vsave_flag = True
-val_flag = True
-val_group_flag = True
-test_flag = True
-test_group_flag = True
-
-model_path = '~/nuclei_maskrcnn/logs/nuclei_train20180000T0000/mask_rcnn_nuclei_train_0000.h5'
-###########################################
-# Train vs. validation split
-###########################################
-
-train_ids = []
-val_ids = []
-rep_id = [2,2,8,6,4,4,8]
-
-df = pd.read_csv('image_group_train.csv')
-ids = df['id']
-groups = df['group']
-istrain = df['istrain']
-mosaic_ids = df['mosaic_id']
-train_ids_mosaic = np.unique(mosaic_ids[istrain==1])[1:]
-
-for k in range(len(ids)):
-    if istrain[k]:
-        for iter_tmp in range(rep_id[groups[k] - 1]):
-            train_ids.append(ids[k])
-        if label_all:
-            val_ids.append(ids[k])
-    else:
-        val_ids.append(ids[k])
-
-for k in range(len(train_ids)):
-    train_ids[k] = os.path.join(TRAIN_DATA_PATH, train_ids[k], 'images', train_ids[k] + '.png')
-train_ids_ext = glob.glob(TRAIN_DATA_EXT_PATH + '/*/images/*.png')
-train_ids.extend(train_ids_ext)
-
-for k, id_m in enumerate(train_ids_mosaic):
-    train_ids_mosaic[k] = os.path.join(TRAIN_DATA_MOSAIC_PATH, id_m, 'images', id_m + '_image.png')
-train_ids.extend(train_ids_mosaic)
-
-test_ids = next(os.walk(TEST_DATA_PATH))[1]
-test_ids_m = next(os.walk(TEST_DATA_MOSAIC_PATH))[1]
-
-print('train = ' + str(len(train_ids)) + ' external = ' + str(len(train_ids_ext)))
-
-dim_min = 512
-dim_max = 1024
-
-foldername_suffix = '_' + str(dim_min) + '_' + str(dim_max) + '_mod_bound_all'
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 ###########################################
-# Inference Config
+# Inference Configuration
 ###########################################
 class TrainingConfig(Config):
     NAME = "nuclei_train"
     IMAGES_PER_GPU = 1
-    GPU_COUNT = 1
 
     NUM_CLASSES = 1 + 1
-    VALIDATION_STEPS = 3
+    VALIDATION_STEPS = 50
 
     RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)
     RPN_TRAIN_ANCHORS_PER_IMAGE = 384
@@ -123,22 +49,13 @@ class TrainingConfig(Config):
     BACKBONE_NAME = 'resnet50'
 
 class InferenceConfig(TrainingConfig):
-    GPU_COUNT = 1
     IMAGES_PER_GPU = 1
 
     SAVE_PROB_MASK = False
     POST_NMS_ROIS_INFERENCE = 1000
 
-    if '201803' in model_path:
-        RPN_ANCHOR_SCALES = (16, 32, 64, 128)
-        RPN_TRAIN_ANCHORS_PER_IMAGE = 256
-        TRAIN_ROIS_PER_IMAGE = 256
-
-inference_config = InferenceConfig(dim_max, dim_min)
-inference_config.display()
-
 ###########################################
-# Load Nuclei Dataset
+# Define nuclei dataset
 ###########################################
 
 class NucleiDataset(utils.Dataset):
@@ -165,32 +82,10 @@ class NucleiDataset(utils.Dataset):
         return mask, class_ids
 
 ###########################################
-# Data prepare
-###########################################
-
-dataset_val = NucleiDataset()
-dataset_val.add_class("cell", 1, "nulcei")
-for k, val_id in enumerate(val_ids):
-    dataset_val.add_image("cell", k, os.path.join(TRAIN_DATA_PATH, val_id, 'images', val_id + '.png'))
-dataset_val.prepare()
-
-dataset_test = NucleiDataset()
-dataset_test.add_class("cell", 1, "nulcei")
-for k, test_id in enumerate(test_ids):
-    dataset_test.add_image("cell", k, os.path.join(TEST_DATA_PATH, test_id, 'images', test_id + '.png'))
-dataset_test.prepare()
-
-dataset_test_m = NucleiDataset()
-dataset_test_m.add_class("cell", 1, "nulcei")
-for k, test_id_m in enumerate(test_ids_m):
-    dataset_test_m.add_image("cell", k, os.path.join(TEST_DATA_MOSAIC_PATH, test_id_m, 'images', test_id_m + '_image.png'))
-dataset_test_m.prepare()
-
-###########################################
 # Validation / Test
 ###########################################
 
-def compute_val(vflip=False, hflip=False):
+def compute_val(MODEL_DIR, model_path, inference_config, TEST_VAL_MASK_SAVE_PATH, dataset_val, vflip=False, hflip=False):
     model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
     assert model_path != "", "Provide path to trained weights"
     print("Loading weights from ", model_path)
@@ -203,13 +98,11 @@ def compute_val(vflip=False, hflip=False):
     if hflip:
         model_name = model_name + '_hflip'
 
-    if vsave_flag and not os.path.exists(TEST_VAL_MASK_SAVE_PATH + '/' + model_name):
+    if not os.path.exists(TEST_VAL_MASK_SAVE_PATH + '/' + model_name):
         os.makedirs(TEST_VAL_MASK_SAVE_PATH + '/' + model_name)
 
     APs = []
     for image_id in dataset_val.image_ids:
-        # test_image, image_meta, gt_class_id, gt_bbox, gt_mask = \
-        #     modellib.load_image_gt_noresize(dataset_val, inference_config, image_id, use_mini_mask=False)
         test_image = dataset_val.load_image(image_id)
         gt_mask, _ = dataset_val.load_mask(image_id)
 
@@ -269,7 +162,7 @@ def compute_val(vflip=False, hflip=False):
     print("mAP: ", np.mean(APs))
     del model_inf
 
-def compute_val_group(vflip=False, hflip=False):
+def compute_val_group(MODEL_DIR, model_path, TEST_VAL_MASK_SAVE_PATH, dataset_val, vflip=False, hflip=False):
     min_dim = []
     max_dim =[]
     min_dim_config = []
@@ -300,7 +193,7 @@ def compute_val_group(vflip=False, hflip=False):
     hm_models = 0  # how many models used
     for i, image_id in enumerate(test_image_ids):
         if (i == 0) or (max_min_dim_config[i] != max_min_dim_config[i - 1]):
-            inference_config_group = InferenceConfig(max_dim_config[i], min_dim_config[i])
+            inference_config_group = InferenceConfig(max_dim_config[i], min_dim_config[i],10)
             model_inf = modellib.MaskRCNN(mode="inference",
                                           config=inference_config_group,
                                           model_dir=MODEL_DIR)
@@ -321,8 +214,6 @@ def compute_val_group(vflip=False, hflip=False):
             hm_models += 1
 
         print max_dim[i], min_dim[i], max_dim_config[i], min_dim_config[i]
-        # test_image, image_meta, gt_class_id, gt_bbox, gt_mask = \
-        #     modellib.load_image_gt_noresize(dataset_val, inference_config_group, image_id, use_mini_mask=False)
         test_image = dataset_val.load_image(image_id)
         gt_mask, _ = dataset_val.load_mask(image_id)
 
@@ -382,7 +273,7 @@ def compute_val_group(vflip=False, hflip=False):
     print("mAP: ", np.mean(APs))
     del model_inf
 
-def compute_test(vflip=False,hflip=False):
+def compute_test(MODEL_DIR, model_path, inference_config, TEST_MASK_SAVE_PATH, dataset_test, vflip=False,hflip=False):
 
     model_inf = modellib.MaskRCNN(mode="inference", config=inference_config, model_dir=MODEL_DIR)
     assert model_path != "", "Provide path to trained weights"
@@ -456,11 +347,11 @@ def compute_test(vflip=False,hflip=False):
 
     # Create submission DataFrame
     sub = pd.DataFrame()
-    sub['ImageId'] = new_test_ids
-    sub['EncodedPixels'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
-    sub.to_csv('submission/sub-test-'+model_name+'.csv', index=False)
+    sub['ID'] = new_test_ids
+    sub['RLE'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
+    sub.to_csv('RLE-test-'+model_name+'.csv', index=False)
 
-def compute_test_group(vflip=False, hflip=False):
+def compute_test_group(MODEL_DIR, model_path, TEST_MASK_SAVE_PATH, dataset_test, vflip=False, hflip=False):
     min_dim = []
     max_dim = []
     min_dim_config = []
@@ -493,7 +384,7 @@ def compute_test_group(vflip=False, hflip=False):
     hm_models = 0  # how many models used
     for i, image_id in enumerate(test_image_ids):
         if (i == 0) or (max_min_dim_config[i] != max_min_dim_config[i - 1]):
-            inference_config_group = InferenceConfig(max_dim_config[i], min_dim_config[i])
+            inference_config_group = InferenceConfig(max_dim_config[i], min_dim_config[i], 10)
             model_inf = modellib.MaskRCNN(mode="inference",
                                           config=inference_config_group,
                                           model_dir=MODEL_DIR)
@@ -568,26 +459,101 @@ def compute_test_group(vflip=False, hflip=False):
 
     del model_inf
     sub = pd.DataFrame()
-    sub['ImageId'] = new_test_ids
-    sub['EncodedPixels'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
-    sub.to_csv('submission/sub-test-'+model_name+'.csv', index=False)
+    sub['ID'] = new_test_ids
+    sub['RLE'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
+    sub.to_csv('RLE-test-'+model_name+'.csv', index=False)
 
-if val_flag:
-    compute_val(vflip=False, hflip=False)
-    compute_val(vflip=True, hflip=False)
-    compute_val(vflip=False, hflip=True)
+def main_train(params):
 
-if val_group_flag:
-    compute_val_group(vflip=False, hflip=False)
-    compute_val_group(vflip=True, hflip=False)
-    compute_val_group(vflip=False, hflip=True)
+    ROOT_DIR = params['dir_root']
+    log_name = params['dir_log']
+    dim_min = params['dim_min']
+    dim_max = params['dim_max']
+    model_path = params['model_path']
 
-if test_flag:
-    compute_test(vflip=False, hflip=False)
-    compute_test(vflip=True, hflip=False)
-    compute_test(vflip=False, hflip=True)
+    MODEL_DIR = os.path.join(ROOT_DIR, log_name)
 
-if test_group_flag:
-    compute_test_group(vflip=False, hflip=False)
-    compute_test_group(vflip=True, hflip=False)
-    compute_test_group(vflip=False, hflip=True)
+    # Directory of nuclei data
+    DATA_DIR = os.path.join(ROOT_DIR, "data")
+    TRAIN_DATA_PATH = os.path.join(DATA_DIR, "train")
+    TEST_DATA_PATH = os.path.join(DATA_DIR, "test")
+    TEST_VAL_MASK_SAVE_PATH = os.path.join(DATA_DIR, "masks_val")
+    TEST_MASK_SAVE_PATH = os.path.join(DATA_DIR, "masks_test")
+
+    import tensorflow as tf
+    config_tf = tf.ConfigProto()
+    config_tf.gpu_options.allow_growth = True
+    session = tf.Session(config=config_tf)
+
+    ###########################################
+    # Train vs. validation split
+    ###########################################
+
+    train_ids = []
+    val_ids = []
+    rep_id = [1,3,3]
+
+    df = pd.read_csv('image_group_train.csv')
+    ids = df['id']
+    groups = df['group']
+    istrain = df['istrain']
+
+    for k in range(len(ids)):
+        if istrain[k]:
+            for iter_tmp in range(rep_id[groups[k] - 1]):
+                train_ids.append(ids[k])
+        else:
+            val_ids.append(ids[k])
+
+    test_ids = next(os.walk(TEST_DATA_PATH))[1]
+
+    inference_config = InferenceConfig(dim_max, dim_min, len(test_ids))
+    inference_config.display()
+
+    ###########################################
+    # Data prepare
+    ###########################################
+
+    dataset_val = NucleiDataset()
+    dataset_val.add_class("cell", 1, "nulcei")
+    for k, val_id in enumerate(val_ids):
+        dataset_val.add_image("cell", k, os.path.join(TRAIN_DATA_PATH, val_id, 'images', val_id + '.png'))
+    dataset_val.prepare()
+
+    dataset_test = NucleiDataset()
+    dataset_test.add_class("cell", 1, "nulcei")
+    for k, test_id in enumerate(test_ids):
+        dataset_test.add_image("cell", k, os.path.join(TEST_DATA_PATH, test_id, 'images', test_id + '.png'))
+    dataset_test.prepare()
+
+    compute_val(MODEL_DIR, model_path, inference_config, TEST_VAL_MASK_SAVE_PATH, dataset_val,vflip=False, hflip=False)
+    compute_val(MODEL_DIR, model_path, inference_config, TEST_VAL_MASK_SAVE_PATH, dataset_val,vflip=True, hflip=False)
+    compute_val(MODEL_DIR, model_path, inference_config, TEST_VAL_MASK_SAVE_PATH, dataset_val,vflip=False, hflip=True)
+
+    compute_val_group(MODEL_DIR, model_path, TEST_VAL_MASK_SAVE_PATH, dataset_val, vflip=False, hflip=False)
+    compute_val_group(MODEL_DIR, model_path, TEST_VAL_MASK_SAVE_PATH, dataset_val, vflip=True, hflip=False)
+    compute_val_group(MODEL_DIR, model_path, TEST_VAL_MASK_SAVE_PATH, dataset_val, vflip=False, hflip=True)
+
+    compute_test(MODEL_DIR, model_path, inference_config, TEST_MASK_SAVE_PATH, dataset_test,vflip=False, hflip=False)
+    compute_test(MODEL_DIR, model_path, inference_config, TEST_MASK_SAVE_PATH, dataset_test,vflip=True, hflip=False)
+    compute_test(MODEL_DIR, model_path, inference_config, TEST_MASK_SAVE_PATH, dataset_test,vflip=False, hflip=True)
+
+    compute_test_group(MODEL_DIR, model_path, TEST_MASK_SAVE_PATH, dataset_test, vflip=False, hflip=False)
+    compute_test_group(MODEL_DIR, model_path, TEST_MASK_SAVE_PATH, dataset_test, vflip=True, hflip=False)
+    compute_test_group(MODEL_DIR, model_path, TEST_MASK_SAVE_PATH, dataset_test, vflip=False, hflip=True)
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--dir_root', default='', help='root directory of the project')
+    parser.add_argument('--dir_log', default='logs', help='log directory')
+
+    parser.add_argument('--dim_min', default=512, type=int, help='size of image for inference - minimal size')
+    parser.add_argument('--dim_max', default=1024, type=int,help='size of image for inference - maximal size')
+
+    parser.add_argument('--model_path', default='', help='logs/nuclei_train20180000T0000/mask_rcnn_nuclei_train_0000.h5')
+
+    args = parser.parse_args()
+    params = vars(args) # convert to ordinary dict
+    main_train(params)
