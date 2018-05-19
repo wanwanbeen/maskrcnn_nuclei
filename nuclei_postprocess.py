@@ -4,87 +4,71 @@ __authors__="Jie Yang and Xinyang Feng"
 # mask2rle after postprocessing
 ###########################################
 
+import argparse
 import numpy as np
+import os
 import glob
 import pandas as pd
+import cv2
+from scipy import ndimage
 
 def postprocess(dir_input, dir_output):
 
-    dir_img = glob.glob(dir_input + '*.png')
-    dir_mask = dir([dir1 '*.npy'])
-    colors = [250, 200, 80]
+    dir_mask = glob.glob(dir_input +'/*_mask.npy')
+    colors_1 = [80, 200, 250]
+    colors_2 = [250, 200, 80]
+    kernel = np.ones((3,3), np.uint8)
 
-    se = ones(3, 3)
-
-    num_subfigures = 3
-
-    for i= 1:size(dir_mask):
-        id = dir_mask(i).name(1:end - 9)
-        I = imread([dir_img(i).folder '/' dir_img(i).name])
-        M = readNPY([dir_mask(i).folder '/' dir_mask(i).name])
-        I = I(:, 1:size(I, 2) / num_subfigures,:)
-        tmp1 = I(:,:, 1)
-        tmp2 = I(:,:, 2)
-        tmp3 = I(:,:, 3)
-        if sum(tmp1(: ):
-            -tmp2(:)) == 0 & sum(tmp2(:)-tmp2(:)) == 0
-            gray_image = 1
+    for i in range(len(dir_mask)):
+        id = dir_mask[i].split('/')[-1][:-9]
+        I = cv2.imread(dir_input + '/ensemble_'+ id + '_mask.png')
+        M = np.load(dir_mask[i])
+        I = I[:, :I.shape[1]/3,:]
+        tmp1 = I[:,:,0]
+        tmp2 = I[:,:,1]
+        tmp3 = I[:,:,2]
+        if np.sum((tmp1-tmp2).astype(int)) == 0 & np.sum((tmp2-tmp3).astype(int)) == 0:
+            gray_image = True
         else:
-            gray_image = 0
+            gray_image = False
 
-    V = unique(M(:))
-    V(1) = []
-    Mnew = zeros(size(M))
+        V = np.unique(M)[1:]
+        Mnew = np.zeros(M.shape)
 
-    mean_size = sum(M(:) > 0) / length(V)
+        for n in V:
+            tmp = np.zeros(M.shape)
+            tmp[M == n] = 1
 
-    for n=1:length(V):
-        tmp = zeros(size(M))
-        tmp(M == V(n)) = 1
+            if gray_image:
+                tmp_d = cv2.morphologyEx(tmp, cv2.MORPH_CLOSE, kernel).astype(int)
+            else:
+                tmp_d = cv2.dilate(tmp, kernel).astype(int)
 
-    if gray_image:
-        tmp_d = imclose(tmp, se)
-    else
-        tmp_d = imdilate(tmp, se)
+            tmp_f = ndimage.binary_fill_holes(tmp_d).astype(int)
+            tmp_f[0,:] = tmp_f[1,:]
+            tmp_f[:,0] = tmp_f[:,1]
+            tmp_f[-1,:] = tmp_f[-2,:]
+            tmp_f[:,-1] = tmp_f[:,-2]
 
+            Mnew[tmp_f > 0] = n
 
-    tmp_f = imfill(tmp_d)
-    tmp_f(1,:)=tmp_f(2,:)
-    tmp_f(:, 1)=tmp_f(:, 2)
-    tmp_f(end,:)=tmp_f(end - 1,:)
-    tmp_f(:, end)=tmp_f(:, end - 1)
+        Im = I.copy()
+        for z in range(I.shape[2]):
+            tmp = Im[:,:, z]
+            tmp[M > 0] = colors_1[z]
+            Im[:,:, z] = tmp
 
-    tmp_f = bwareafilt(tmp_f > 0, 1)
+        Imnew = I.copy()
+        for z in range(I.shape[2]):
+            tmp = Imnew[:,:, z]
+            tmp[Mnew > 0] = colors_2[z]
+            Imnew[:,:, z] = tmp
 
-    if sum(tmp_f(: ) > 0) / mean_size <= 10 % 3.5:
-        Mnew(tmp_f > 0) = V(n)
-
-    figure(1);
-    subplot(1, 3, 1);
-    imshow(I);
-    Im = I;
-    for z=1:3
-    tmp = Im(:,:, z);
-    tmp(M > 0) = colors(z);
-    Im(:,:, z)=tmp;
-    end
-    subplot(1, 3, 2);
-    imshow(Im);
-
-    Im = I;
-    for z=1:3
-    tmp = Im(:,:, z);
-    tmp(Mnew > 0) = colors(z);
-    Im(:,:, z)=tmp;
-    end
-    subplot(1, 3, 3);
-    imshow(Im);
-
-    I = imread([dir_img(i).folder '/' dir_img(i).name]);
-    I(:, size(I, 2) / num_subfigures * 2 + 1:end,:) = Im;
-    % imwrite(I, [dir_img(i).folder '/' dir_img(i).name]);
-
-    np.save(Mnew, [dir_out + dir_mask(i).name])
+        I = cv2.imread(dir_input + '/ensemble_' + id + '_mask.png')
+        I[:, I.shape[1] / 3 * 1:I.shape[1] / 3 * 2,:] = Im
+        I[:, I.shape[1] / 3 * 2:,:] = Imnew
+        cv2.imwrite(dir_output+'/' + id + '_mask.png', I)
+        np.save(dir_output + '/'+dir_mask[i].split('/')[-1], Mnew)
 
 def rle_encoding(x):
     dots = np.where(x.T.flatten()==1)[0]
@@ -100,8 +84,7 @@ def prob_to_rle(x,cutoff = 0.5):
     yield rle_encoding(x>cutoff)
 
 def write_rle(dir_input):
-    image_id = glob.glob(dir_input+'*.npy')
-
+    image_id = glob.glob(dir_input+'/*.npy')
     rles = []
     test_id = []
     for ids in image_id:
@@ -129,6 +112,10 @@ def main_ensemble(params):
 
     MASK_ENSEMBLE_SAVE_PATH = params['MASK_ENSEMBLE_SAVE_PATH']
     MASK_POSTPROCESS_SAVE_PATH = params['MASK_POSTPROCESS_SAVE_PATH']
+
+    if not os.path.exists(MASK_POSTPROCESS_SAVE_PATH):
+        os.makedirs(MASK_POSTPROCESS_SAVE_PATH)
+
     postprocess(MASK_ENSEMBLE_SAVE_PATH, MASK_POSTPROCESS_SAVE_PATH)
     write_rle(MASK_POSTPROCESS_SAVE_PATH)
 

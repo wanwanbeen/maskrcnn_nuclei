@@ -158,7 +158,6 @@ def main_ensemble(params):
         ensemble_dirs.append(ensemble_input_dir + '/' + models + '_vflip/')
         ensemble_dirs.append(ensemble_input_dir + '/' + models + '_hflip/')
 
-    print ensemble_dirs
     ensemble_func(ensemble_dirs=ensemble_dirs, MASK_ENSEMBLE_SAVE_PATH=MASK_ENSEMBLE_SAVE_PATH,
                   IMAGE_PATH=IMAGE_PATH,test_flag=test_flag)
 
@@ -184,7 +183,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_flag', default=True,
                         help='if yes: ensemble on test images, otherwise on validation images')
 
-    parser.add_argument('--model_names', default=['nuclei_train20180518T2026_0024','nuclei_train20180519T0111_0025'],
+    parser.add_argument('--model_names', nargs='+', default=['nuclei_train20180000T0000_0000','nuclei_train20180001T0000_0000'],
                         help='models to ensemble')
 
     args = parser.parse_args()
