@@ -1,10 +1,9 @@
-__authors__="Jie Yang and Xinyang Feng"
-
-###########################################
-# main models
-###########################################
-
 from __future__ import division
+authors__="Jie Yang and Xinyang Feng"
+
+###########################################
+# main mask rcnn model
+###########################################
 
 import os
 import sys

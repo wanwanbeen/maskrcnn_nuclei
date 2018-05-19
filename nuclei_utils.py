@@ -1,10 +1,9 @@
+from __future__ import division
 __authors__="Jie Yang and Xinyang Feng"
 
 ###########################################
 # utility functions
 ###########################################
-
-from __future__ import division
 
 import sys
 import os

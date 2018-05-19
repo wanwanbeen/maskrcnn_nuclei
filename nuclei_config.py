@@ -1,10 +1,9 @@
+from __future__ import division
 __authors__="Jie Yang and Xinyang Feng"
 
 ###########################################
 # configuration class
 ###########################################
-
-from __future__ import division
 
 import math
 import numpy as np

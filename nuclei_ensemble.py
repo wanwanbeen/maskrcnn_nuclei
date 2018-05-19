@@ -1,10 +1,8 @@
 __authors__="Jie Yang and Xinyang Feng"
 
-###########################################
-# ensemble
-###########################################
 import glob
 import skimage.io
+import argparse
 from networkx.algorithms.components.connected import connected_components
 import os
 import numpy as np
@@ -12,22 +10,7 @@ from skimage.color import label2rgb
 import pandas as pd
 from nuclei_utils import deoverlap_masks, prob_to_rles, to_graph, compute_overlaps_masks, sweep_iou_mask_ap
 
-TEST_IMAGE_PATH = '~/data/stage1_test_image/'
-TRAIN_IMAGE_PATH = '~/nuclei_maskrcnn/data/stage1_train_image/'
-TEST_MASK_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_test/'
-VAL_MASK_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_val/'
-VAL_MASK_ENSEMBLE_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_val_ensemble/'
-TEST_MASK_ENSEMBLE_SAVE_PATH = '~/nuclei_maskrcnn/data/stage1_masks_test_ensemble/'
-
-def ensemble_func(ensemble_dirs = None, iou_threshold = 0.5, model_name = '', test_flag=True):
-    if test_flag:
-        MASK_ENSEMBLE_SAVE_PATH = TEST_MASK_ENSEMBLE_SAVE_PATH
-    else:
-        MASK_ENSEMBLE_SAVE_PATH = VAL_MASK_ENSEMBLE_SAVE_PATH
-
-    MASK_ENSEMBLE_SAVE_PATH = os.path.join(MASK_ENSEMBLE_SAVE_PATH,model_name)
-    if not os.path.exists(MASK_ENSEMBLE_SAVE_PATH):
-        os.mkdir(MASK_ENSEMBLE_SAVE_PATH)
+def ensemble_func(ensemble_dirs = None, MASK_ENSEMBLE_SAVE_PATH ='', IMAGE_PATH = '', test_flag = True, iou_threshold = 0.5):
 
     test_ids = glob.glob(ensemble_dirs[0]+'*_mask.npy')
     for i in range(len(test_ids)):
@@ -88,11 +71,7 @@ def ensemble_func(ensemble_dirs = None, iou_threshold = 0.5, model_name = '', te
         for d in (detection_results):
             all_masks = np.concatenate((all_masks, label2rgb(d, bg_label=0)),axis=1)
 
-        if test_flag:
-            image = skimage.io.imread(TEST_IMAGE_PATH + test_id + '.png')[:,:,:3]
-        else:
-            image = skimage.io.imread(TRAIN_IMAGE_PATH + test_id + '.png')[:, :, :3]
-
+        image = skimage.io.imread(IMAGE_PATH + '/' + test_id + '/images/' + test_id + '.png')[:,:,:3]
         image0 = image.copy()
         print image0.shape, all_masks.shape
         skimage.io.imsave(
@@ -121,7 +100,7 @@ def ensemble_func(ensemble_dirs = None, iou_threshold = 0.5, model_name = '', te
         tmp[masks_new_c > 0] = 80
         image[:, :, 2] = tmp.copy()
 
-        skimage.io.imsave(MASK_ENSEMBLE_SAVE_PATH + '/plot2_' + test_id + '_mask.png',
+        skimage.io.imsave(MASK_ENSEMBLE_SAVE_PATH + '/ensemble_' + test_id + '_mask.png',
                           np.concatenate((image0 / 255.,
                                           label2rgb(masks_new_c, bg_label=0), image / 255.), axis=1))
         np.save(MASK_ENSEMBLE_SAVE_PATH + '/' + test_id + '_mask.npy', masks_new_c)
@@ -141,29 +120,73 @@ def ensemble_func(ensemble_dirs = None, iou_threshold = 0.5, model_name = '', te
             APs.append(AP)
             print np.mean(APs)
 
-    if test_flag:
-        # Create submission DataFrame
-        sub = pd.DataFrame()
-        sub['ID'] = new_test_ids
-        sub['RLE'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
-        sub.to_csv('RLE-test-'+model_name+'_ensemble.csv', index=False)
-	
+    # if test_flag:
+    #     sub = pd.DataFrame()
+    #     sub['ID'] = new_test_ids
+    #     sub['RLE'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
+    #     sub.to_csv('RLE-test-ensemble.csv', index=False)
+
 ###########################################
 # main
 ###########################################
 
-test_flag = False
+def main_ensemble(params):
 
-if test_flag:
-    ensemble_input_dir = TEST_MASK_SAVE_PATH
-else:
-    ensemble_input_dir = VAL_MASK_SAVE_PATH
+    TRAIN_IMAGE_PATH = params['TRAIN_IMAGE_PATH']
+    TEST_IMAGE_PATH = params['TEST_IMAGE_PATH']
+    VAL_MASK_SAVE_PATH = params['VAL_MASK_SAVE_PATH']
+    TEST_MASK_SAVE_PATH = params['TEST_MASK_SAVE_PATH']
+    VAL_MASK_ENSEMBLE_SAVE_PATH = params['VAL_MASK_ENSEMBLE_SAVE_PATH']
+    TEST_MASK_ENSEMBLE_SAVE_PATH = params['TEST_MASK_ENSEMBLE_SAVE_PATH']
+    test_flag = params['test_flag']
+    model_names = params['model_names']
 
-model_name = 'nuclei_train20180000T0000_0000'
-ensemble_dirs = [ensemble_input_dir + '/' + model_name + '/',
-                 ensemble_input_dir + '/' + model_name + '_vflip/',
-                 ensemble_input_dir + '/' + model_name + '_hflip/']
+    if test_flag:
+        IMAGE_PATH = TEST_IMAGE_PATH
+        ensemble_input_dir = TEST_MASK_SAVE_PATH
+        MASK_ENSEMBLE_SAVE_PATH = TEST_MASK_ENSEMBLE_SAVE_PATH
+    else:
+        IMAGE_PATH = TRAIN_IMAGE_PATH
+        ensemble_input_dir = VAL_MASK_SAVE_PATH
+        MASK_ENSEMBLE_SAVE_PATH = VAL_MASK_ENSEMBLE_SAVE_PATH
 
-model_name = 'ensemble'
-print ensemble_dirs
-ensemble_func(ensemble_dirs=ensemble_dirs, model_name=model_name, test_flag=test_flag)
+    if not os.path.exists(MASK_ENSEMBLE_SAVE_PATH):
+        os.makedirs(MASK_ENSEMBLE_SAVE_PATH)
+    ensemble_dirs = []
+    for models in model_names:
+        ensemble_dirs.append(ensemble_input_dir + '/' + models + '/')
+        ensemble_dirs.append(ensemble_input_dir + '/' + models + '_vflip/')
+        ensemble_dirs.append(ensemble_input_dir + '/' + models + '_hflip/')
+
+    print ensemble_dirs
+    ensemble_func(ensemble_dirs=ensemble_dirs, MASK_ENSEMBLE_SAVE_PATH=MASK_ENSEMBLE_SAVE_PATH,
+                  IMAGE_PATH=IMAGE_PATH,test_flag=test_flag)
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--TRAIN_IMAGE_PATH', default='data/train',
+                        help='directory of training images')
+    parser.add_argument('--TEST_IMAGE_PATH', default='data/test',
+                        help='directory of test images')
+
+    parser.add_argument('--VAL_MASK_SAVE_PATH', default='data/masks_val',
+                        help='directory of segmentation masks for validation images')
+    parser.add_argument('--TEST_MASK_SAVE_PATH', default='data/masks_test',
+                        help='directory of segmentation masks for test images')
+
+    parser.add_argument('--VAL_MASK_ENSEMBLE_SAVE_PATH', default='data/masks_val_ensemble',
+                        help='directory of segmentation masks for validation images after ensemble')
+    parser.add_argument('--TEST_MASK_ENSEMBLE_SAVE_PATH', default='data/masks_test_ensemble',
+                        help='directory of segmentation masks for test images after ensemble')
+
+    parser.add_argument('--test_flag', default=True,
+                        help='if yes: ensemble on test images, otherwise on validation images')
+
+    parser.add_argument('--model_names', default=['nuclei_train20180518T2026_0024','nuclei_train20180519T0111_0025'],
+                        help='models to ensemble')
+
+    args = parser.parse_args()
+    params = vars(args) # convert to ordinary dict
+    main_ensemble(params)
