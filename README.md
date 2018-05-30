@@ -27,7 +27,7 @@ Example data in `data/` is from [Kaggle DSB18](https://www.kaggle.com/c/data-sci
 
 (Skip if you do not need mosaic)
 * Some small training images (e.g. in [Kaggle DSB18](https://www.kaggle.com/c/data-science-bowl-2018)) may come from the same large image;
-* Run nuclei_mosaic.py to recover the original image - this is useful for data augmentation.
+* Run nuclei_mosaic.py to recover the original image - this is useful for data augmentation and the segmentation of objects on the image boundaries. 
 
 ```
 python nuclei_mosaic.py --TRAIN_DIR data/train --MOSAIC_TRAIN_DIR data/mosaic_train
