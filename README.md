@@ -1,6 +1,6 @@
 # maskrcnn_nuclei
 
-This repository contains the codes for nuclei instance segmentation using Mask R-CNN.
+This repository contains a full tutorial for nuclei instance segmentation using Mask R-CNN, including image pre-processing, Mask R-CNN with training augmentation, test stage ensemble and post-processing.
 
 The code for Mask R-CNN model is adapted from [MatterPort implementation](https://github.com/matterport/Mask_RCNN).
 
@@ -26,7 +26,7 @@ Example data in `data/` is from [Kaggle DSB18](https://www.kaggle.com/c/data-sci
 #### Step 2: 
 
 (Skip if you do not need mosaic)
-* Some small training images may come from the same large image;
+* Some small training images (e.g. in [Kaggle DSB18](https://www.kaggle.com/c/data-science-bowl-2018)) may come from the same large image;
 * Run nuclei_mosaic.py to recover the original image - this is useful for data augmentation.
 
 ```
@@ -74,4 +74,9 @@ python nuclei_postprocess.py
 
 ## Technical Details and Performance
 
+We tested on [Kaggle DSB18](https://www.kaggle.com/c/data-science-bowl-2018) stage 1 training data. 
+
+We split the total N = 670 training images into train vs. validation sets (9 : 1). 
+
+Best single model performance on validation set: mAP = 0.624; after ensemble and post-processing: mAP = 0.645.
 
